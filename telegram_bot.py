@@ -52,7 +52,11 @@ async def main():
     await app.initialize()
     await app.start()
     
-    # Start polling (with await this time!)
+    # ⭐ احذف أي رسائل قديمة معلقة قبل بدء الاستماع
+    await app.bot.delete_webhook(drop_pending_updates=True)
+    logger.info("✅ Cleared pending updates")
+    
+    # Start polling
     await app.updater.start_polling()
     
     # 3. Create health check web server
