@@ -13,10 +13,19 @@ def _safe_stat(stats_list, team_id, stat_name):
             for s in team_stats.get("statistics", []):
                 if s["type"] == stat_name:
                     try:
-                        return float(s["value"]) if s["value"] else 0.0
-                    except:
-                        return s["value"]
-    return 0
+                        val = s["value"]
+                        if val is None:
+                            return 0.0
+                        # Handle percentage strings
+                        if isinstance(val, str) and '%' in val:
+                            return float(val.replace('%', ''))
+                        # Handle other string numbers
+                        if isinstance(val, str):
+                            return float(val)
+                        return float(val)
+                    except (ValueError, TypeError):
+                        return 0.0
+    return 0.0
 
 def compute_tactical_summary(match: Dict, stats: List, events: List, lineups: List) -> Dict[str, Any]:
     """
@@ -34,6 +43,7 @@ def compute_tactical_summary(match: Dict, stats: List, events: List, lineups: Li
     home_shots_off = _safe_stat(stats, home_id, "Shots off Goal")
     away_shots_on = _safe_stat(stats, away_id, "Shots on Goal")
     away_shots_off = _safe_stat(stats, away_id, "Shots off Goal")
+    
     home_total_shots = home_shots_on + home_shots_off
     away_total_shots = away_shots_on + away_shots_off
 
@@ -47,51 +57,65 @@ def compute_tactical_summary(match: Dict, stats: List, events: List, lineups: Li
     away_offsides = _safe_stat(stats, away_id, "Offsides")
 
     # ---------- Tactical Derived Metrics ----------
-    # Pressing intensity proxy: fouls + offsides in attacking third (crude)
-    # We'll use total fouls as pressing intensity indicator
     # Defensive compactness: low shots on target allowed
-    home_def_compact = 1.0 - (away_shots_on / max(away_total_shots, 1)) if away_total_shots else 0.5
-    away_def_compact = 1.0 - (home_shots_on / max(home_total_shots, 1)) if home_total_shots else 0.5
+    home_def_compact = 1.0 - (away_shots_on / max(away_total_shots, 1)) if away_total_shots > 0 else 0.5
+    away_def_compact = 1.0 - (home_shots_on / max(home_total_shots, 1)) if home_total_shots > 0 else 0.5
 
     # Momentum swing: corners + shots on target differential
     home_momentum = home_total_shots + home_corners
     away_momentum = away_total_shots + away_corners
     momentum_diff = home_momentum - away_momentum
 
-    # Half-space occupation cannot be determined without events, so set as unknown
-    # Build-up structure: high possession with low shots may indicate sterile possession
-    home_buildup_efficiency = home_total_shots / max(home_poss, 1) if home_poss else 0
-    away_buildup_efficiency = away_total_shots / max(away_poss, 1) if away_poss else 0
+    # Build-up efficiency: shots per possession percentage
+    home_buildup_efficiency = home_total_shots / max(home_poss, 1) if home_poss > 0 else 0
+    away_buildup_efficiency = away_total_shots / max(away_poss, 1) if away_poss > 0 else 0
 
-    # Progressive passing proxy: corners + shots (corners come from attacking moves)
-    # Width usage: offsides can indicate wide runs behind defence
-    home_width_usage = home_offsides / max(home_poss, 1) if home_poss else 0
-    away_width_usage = away_offsides / max(away_poss, 1) if away_poss else 0
+    # Width usage: offsides indicate wide runs behind defence
+    home_width_usage = home_offsides / max(home_poss, 1) if home_poss > 0 else 0
+    away_width_usage = away_offsides / max(away_poss, 1) if away_poss > 0 else 0
 
-    # xG dominance (not available, so we simulate a basic shot quality metric)
-    home_shot_quality = (home_shots_on / max(home_total_shots, 1)) if home_total_shots else 0
-    away_shot_quality = (away_shots_on / max(away_total_shots, 1)) if away_total_shots else 0
+    # Shot quality: on target rate
+    home_shot_quality = (home_shots_on / max(home_total_shots, 1)) if home_total_shots > 0 else 0
+    away_shot_quality = (away_shots_on / max(away_total_shots, 1)) if away_total_shots > 0 else 0
+
+    # Normalize all values to avoid extreme numbers
+    home_buildup_efficiency = min(home_buildup_efficiency, 2.0)
+    away_buildup_efficiency = min(away_buildup_efficiency, 2.0)
+    home_width_usage = min(home_width_usage, 1.0)
+    away_width_usage = min(away_width_usage, 1.0)
 
     summary = {
         "home_team": match["teams"]["home"]["name"],
         "away_team": match["teams"]["away"]["name"],
-        "home_score": match["goals"]["home"],
-        "away_score": match["goals"]["away"],
-        "possession": {"home": home_poss, "away": away_poss},
+        "home_score": match["goals"]["home"] or 0,
+        "away_score": match["goals"]["away"] or 0,
+        "possession": {"home": round(home_poss, 1), "away": round(away_poss, 1)},
         "shots": {
-            "home": {"total": home_total_shots, "on_target": home_shots_on},
-            "away": {"total": away_total_shots, "on_target": away_shots_on}
+            "home": {"total": int(home_total_shots), "on_target": int(home_shots_on)},
+            "away": {"total": int(away_total_shots), "on_target": int(away_shots_on)}
         },
-        "corners": {"home": home_corners, "away": away_corners},
-        "fouls": {"home": home_fouls, "away": away_fouls},
-        "yellow_cards": {"home": home_yellow, "away": away_yellow},
-        "offsides": {"home": home_offsides, "away": away_offsides},
+        "corners": {"home": int(home_corners), "away": int(away_corners)},
+        "fouls": {"home": int(home_fouls), "away": int(away_fouls)},
+        "yellow_cards": {"home": int(home_yellow), "away": int(away_yellow)},
+        "offsides": {"home": int(home_offsides), "away": int(away_offsides)},
         "tactical_metrics": {
-            "defensive_compactness": {"home": round(home_def_compact, 2), "away": round(away_def_compact, 2)},
+            "defensive_compactness": {
+                "home": round(home_def_compact, 2), 
+                "away": round(away_def_compact, 2)
+            },
             "momentum_index": round(momentum_diff, 2),
-            "buildup_efficiency": {"home": round(home_buildup_efficiency, 2), "away": round(away_buildup_efficiency, 2)},
-            "width_usage": {"home": round(home_width_usage, 2), "away": round(away_width_usage, 2)},
-            "shot_quality": {"home": round(home_shot_quality, 2), "away": round(away_shot_quality, 2)},
+            "buildup_efficiency": {
+                "home": round(home_buildup_efficiency, 2), 
+                "away": round(away_buildup_efficiency, 2)
+            },
+            "width_usage": {
+                "home": round(home_width_usage, 2), 
+                "away": round(away_width_usage, 2)
+            },
+            "shot_quality": {
+                "home": round(home_shot_quality, 2), 
+                "away": round(away_shot_quality, 2)
+            },
         }
     }
     return summary
