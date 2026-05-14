@@ -1,0 +1,13 @@
+gradio>=4.0.0
+requests
+python-dotenv
+pandas
+numpy
+matplotlib
+seaborn
+mplsoccer
+Pillow
+google-generativeai
+python-telegram-bot[job-queue]
+feedparser
+huggingface_hub

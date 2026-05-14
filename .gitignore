@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.pyc
+temp/*
+outputs/*
+data/*
+!temp/.gitkeep
+!outputs/.gitkeep
+!data/.gitkeep
