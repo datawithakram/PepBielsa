@@ -11,3 +11,4 @@ google-generativeai
 python-telegram-bot[job-queue]
 feedparser
 huggingface_hub
+groq

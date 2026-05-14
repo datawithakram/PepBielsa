@@ -5,7 +5,7 @@ import logging
 import json
 import requests
 from telegram import Update
-from telegram.ext import ContextTypes, ConversationHandler
+from telegram.ext import ContextTypes
 from utils import get_today_matches, get_cache, set_cache
 from keyboard import matches_keyboard, main_menu_keyboard
 import os
@@ -13,9 +13,6 @@ import os
 HF_SPACE_URL = os.getenv("HF_SPACE_URL", "https://thehnx-pepbielsa.hf.space")
 
 logger = logging.getLogger(__name__)
-
-# Conversation states
-ASK_QUESTION = 1
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send welcome message with main menu."""
@@ -41,10 +38,6 @@ async def show_matches(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if query:
         await query.answer()
-    else:
-        # Handle as direct command
-        await update.message.reply_text("🔄 Fetching matches...")
-        query = None
     
     try:
         fixtures = get_today_matches()
@@ -79,61 +72,73 @@ async def analyze_match(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Analyze selected match via HF Space."""
     query = update.callback_query
     await query.answer()
-    data = query.data  # e.g., analyze_12345
+    data = query.data
     match_id = data.split("_")[1]
     await query.edit_message_text("🔄 Analyzing match... This may take a minute.")
     
-    # Call HF Space API
     try:
-        # Gradio 4+ API endpoint
+        # المسار الصحيح لـ Gradio 4+
         api_url = f"{HF_SPACE_URL}/gradio_api/call/run_tactical_analysis"
+        
+        # إرسال الطلب
         resp = requests.post(
             api_url,
             json={"data": [int(match_id), None, None, None]},
             timeout=120
         )
-        resp.raise_for_status()
         
-        # Parse Gradio response
+        if resp.status_code != 200:
+            await query.message.reply_text(f"❌ API Error: {resp.status_code}")
+            return
+        
+        # Gradio 4+ يرجع event_id
         result_data = resp.json()
-        # Extract the actual result from Gradio's event-based response
         event_id = result_data.get("event_id")
+        
         if event_id:
-            # Get the actual result
+            # انتظر قليلاً ثم اجلب النتيجة
+            import time
+            time.sleep(5)
+            
             result_resp = requests.get(
-                f"{HF_SPACE_URL}/gradio_api/call/run_tactical_analysis/{event_id}",
+                f"{api_url}/{event_id}",
                 timeout=120
             )
-            result_resp.raise_for_status()
-            result = result_resp.json()
             
-            # Parse the output string (Gradio returns HTML string)
-            output_text = result.get("data", [""])[0]
-            
-            # For now, just send the raw result
-            await query.message.reply_text("✅ Match analysis result:")
-            
-            # Extract report and insights from the HTML
-            if "error" in output_text.lower():
-                await query.message.reply_text(f"❌ {output_text[:4000]}")
-                return
-            
-            # Send the full result
-            await query.message.reply_text(output_text[:4000], parse_mode="HTML")
-            
-            # Store context for follow-up
-            set_cache(f"context_{update.effective_user.id}", {
-                "match_id": match_id,
-                "analysis": output_text[:500]  # Cache first 500 chars for context
-            })
-            
-            await query.message.reply_text(
-                "💬 You can ask tactical follow-up questions about this match. Just type your question.",
-                reply_markup=main_menu_keyboard()
-            )
+            if result_resp.status_code == 200:
+                # النتيجة جاهزة
+                final_result = result_resp.text
+                
+                # إرسال النتيجة للمستخدم
+                if len(final_result) > 4000:
+                    # تقسيم الرسائل الطويلة
+                    for i in range(0, len(final_result), 4000):
+                        await query.message.reply_text(
+                            final_result[i:i+4000],
+                            parse_mode="HTML"
+                        )
+                else:
+                    await query.message.reply_text(final_result[:4000], parse_mode="HTML")
+                
+                # تخزين السياق للأسئلة المتابعة
+                set_cache(f"context_{update.effective_user.id}", {
+                    "match_id": match_id,
+                    "analysis": "Match analyzed"
+                })
+                
+                await query.message.reply_text(
+                    "💬 You can ask tactical follow-up questions about this match. Just type your question.",
+                    reply_markup=main_menu_keyboard()
+                )
+            else:
+                await query.message.reply_text("❌ Analysis result not ready. Please try again.")
         else:
-            await query.message.reply_text("❌ Failed to get analysis result.")
+            # ربما النتيجة مباشرة
+            await query.message.reply_text(str(result_data)[:4000])
             
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Network error: {e}")
+        await query.message.reply_text(f"❌ Network error: {str(e)[:200]}")
     except Exception as e:
         logger.error(f"Analysis failed: {str(e)}")
         await query.message.reply_text(f"❌ Analysis failed: {str(e)[:200]}")
@@ -146,12 +151,14 @@ async def handle_followup_question(update: Update, context: ContextTypes.DEFAULT
     user_id = update.effective_user.id
     context_data = get_cache(f"context_{user_id}")
     if not context_data:
-        await update.message.reply_text("Please analyze a match first (/matches).")
+        await update.message.reply_text(
+            "Please analyze a match first. Use /matches to start.",
+            reply_markup=main_menu_keyboard()
+        )
         return
     
     question = update.message.text
     
-    # Try calling HF Space for Q&A
     try:
         api_url = f"{HF_SPACE_URL}/gradio_api/call/run_tactical_analysis"
         resp = requests.post(
@@ -164,28 +171,26 @@ async def handle_followup_question(update: Update, context: ContextTypes.DEFAULT
             result_data = resp.json()
             event_id = result_data.get("event_id")
             if event_id:
-                result_resp = requests.get(
-                    f"{HF_SPACE_URL}/gradio_api/call/run_tactical_analysis/{event_id}",
-                    timeout=60
-                )
-                answer = result_resp.json().get("data", ["Sorry, I couldn't answer that."])[0]
-                await update.message.reply_text(answer[:4000], parse_mode="HTML")
+                import time
+                time.sleep(3)
+                result_resp = requests.get(f"{api_url}/{event_id}", timeout=60)
+                answer = result_resp.text[:4000]
+                await update.message.reply_text(answer, parse_mode="HTML")
                 return
         
-        # Fallback: simple response
         await update.message.reply_text(
-            "I've received your question. For detailed tactical analysis, please analyze a match first.",
+            "I couldn't process your question. Please try analyzing a match first.",
             reply_markup=main_menu_keyboard()
         )
     except Exception as e:
-        logger.error(f"Q&A failed: {str(e)}")
+        logger.error(f"Q&A failed: {e}")
         await update.message.reply_text(
-            "I can help with tactical questions after you analyze a match. Use /matches to start.",
+            "Q&A service unavailable. Please try again later.",
             reply_markup=main_menu_keyboard()
         )
 
 async def show_news(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show latest football news with tactical implications."""
+    """Show latest football news."""
     query = update.callback_query
     if query:
         await query.answer()
@@ -198,9 +203,7 @@ async def show_news(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             text = "📰 *Football News Intelligence*\n\n"
             for n in news[:5]:
-                text += f"*{n['title']}*\n"
-                if n.get('tactical_implication'):
-                    text += f"→ {n['tactical_implication']}\n\n"
+                text += f"• *{n['title']}*\n"
         
         if query:
             await query.edit_message_text(text[:4000], parse_mode="Markdown", reply_markup=main_menu_keyboard())
@@ -214,7 +217,7 @@ async def show_news(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(error_text)
 
 async def show_press(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show press conference tactical intelligence."""
+    """Show press conference intelligence."""
     query = update.callback_query
     if query:
         await query.answer()
@@ -225,9 +228,7 @@ async def show_press(update: Update, context: ContextTypes.DEFAULT_TYPE):
         analyzed = analyze_quotes(quotes)
         text = "🎙 *Press Conference Intelligence*\n\n"
         for a in analyzed:
-            text += f"*{a['coach']} ({a['team']})*: _{a['quote']}_\n"
-            if a.get('tactical_implication'):
-                text += f"→ {a['tactical_implication']}\n\n"
+            text += f"*{a['coach']}*: _{a['quote']}_\n\n"
         
         if query:
             await query.edit_message_text(text[:4000], parse_mode="Markdown", reply_markup=main_menu_keyboard())
@@ -268,14 +269,13 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "*Commands:*\n"
         "/start - Main menu\n"
         "/matches - Today's matches\n"
-        "/news - Football news with tactical analysis\n"
-        "/daily\\_digest - Daily briefing\n"
+        "/news - Football news\n"
+        "/daily_digest - Daily briefing\n"
         "/help - This help\n\n"
         "*How to use:*\n"
         "1. Use /matches to see today's games\n"
-        "2. Select a match for tactical analysis\n"
-        "3. Ask follow-up questions after analysis\n"
-        "4. Check /news for breaking tactical insights"
+        "2. Select a match for analysis\n"
+        "3. Ask follow-up questions after analysis"
     )
     
     if update.message:
