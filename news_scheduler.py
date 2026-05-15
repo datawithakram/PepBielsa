@@ -18,6 +18,7 @@ from telegram.error import TelegramError
 
 from feed_fetcher import fetch_all, fetch_breaking_alerts
 from news_store import store
+from utils import get_today_matches
 
 logger = logging.getLogger(__name__)
 
@@ -138,12 +139,13 @@ def _get_subscriber_chat_ids() -> List[int]:
             ids.append(int(channel))
         except ValueError:
             ids.append(channel)  # string username like @mychannel
-
-    if admin and admin not in [str(i) for i in ids]:
-        try:
-            ids.append(int(admin))
-        except ValueError:
-            pass
+    else:
+        # Fallback to admin ONLY if no channel is configured
+        if admin:
+            try:
+                ids.append(int(admin))
+            except ValueError:
+                pass
 
     return ids
 
@@ -193,7 +195,6 @@ async def job_breaking_news_check(context):
     logger.info("🚨 Checking for breaking news …")
     breaking_items = fetch_breaking_alerts(max_per_feed=10)
     new_breaking = store.filter_new(breaking_items)
-
     for item in new_breaking[:MAX_BREAKING_ITEMS]:
         for cid in chat_ids:
             await _send_item(bot, cid, item, "breaking")
@@ -201,6 +202,59 @@ async def job_breaking_news_check(context):
     if new_breaking:
         logger.info(f"🚨 Sent {len(new_breaking)} breaking news item(s).")
 
+async def job_check_finished_matches(context):
+    """
+    APScheduler job: checks for newly finished major matches.
+    Notifies the ADMIN_CHAT_ID to run analysis.
+    """
+    bot: Bot = context.bot
+    admin_id = os.getenv("ADMIN_CHAT_ID", "").strip()
+    if not admin_id:
+        return
+
+    try:
+        admin_chat_id = int(admin_id)
+    except ValueError:
+        return
+
+    logger.info("🏟 Checking for newly finished matches...")
+    try:
+        # Fetch major matches only
+        matches = get_today_matches(major_only=True)
+    except Exception as e:
+        logger.error(f"Failed to fetch matches for notification: {e}")
+        return
+
+    for m in matches:
+        match_id = m.get("fixture", {}).get("id")
+        status = m.get("fixture", {}).get("status", {}).get("short")
+        
+        # FT: Full Time, AET: After Extra Time, PEN: Penalties
+        if status in ["FT", "AET", "PEN"]:
+            dedup_key = f"match_ft_{match_id}"
+            
+            if not store.is_seen(dedup_key):
+                home = m.get("teams", {}).get("home", {}).get("name", "Home")
+                away = m.get("teams", {}).get("away", {}).get("name", "Away")
+                score_h = m.get("goals", {}).get("home", 0)
+                score_a = m.get("goals", {}).get("away", 0)
+                league = m.get("league", {}).get("name", "")
+
+                msg = (
+                    f"🔔 *Match Finished!*\n\n"
+                    f"🏆 {league}\n"
+                    f"⚽ {home} {score_h} - {score_a} {away}\n\n"
+                    f"👉 Click to analyze: /analyze\\_{match_id}"
+                )
+                
+                try:
+                    await bot.send_message(chat_id=admin_chat_id, text=msg, parse_mode="Markdown")
+                    store.mark_seen(dedup_key)
+                    # We save the store implicitly later or we can do it manually,
+                    # but store.filter_new saves it. Let's call a quick save.
+                    store._save()
+                except TelegramError as e:
+                    logger.error(f"Failed to send match notification: {e}")
 
 # ── registration helper ───────────────────────────────────────────────────────
 
@@ -230,7 +284,15 @@ def register_jobs(app):
         name="breaking_news",
     )
 
+    # Match notifications: every 15 minutes, first run after 45s
+    jq.run_repeating(
+        job_check_finished_matches,
+        interval=15 * 60,
+        first=45,
+        name="finished_matches",
+    )
+
     logger.info(
         f"✅ Jobs registered — news every {POLL_INTERVAL_MINUTES}m, "
-        f"breaking every {BREAKING_INTERVAL_MINUTES}m"
+        f"breaking every {BREAKING_INTERVAL_MINUTES}m, matches every 15m"
     )

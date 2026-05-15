@@ -312,6 +312,52 @@ async def admin_reset_news(update: Update, context: ContextTypes.DEFAULT_TYPE):
     store.reset()
     await update.message.reply_text("✅ News dedup store cleared. All articles are now 'new' again.")
 
+async def admin_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command: /admin_status — Check API usage quotas."""
+    admin_id = os.getenv("ADMIN_CHAT_ID", "")
+    uid = str(update.effective_user.id)
+    if admin_id and uid != admin_id:
+        await update.message.reply_text("⛔ Not authorised.")
+        return
+
+    await update.message.reply_text("🔄 Checking API Status...")
+    try:
+        from utils import api_football_get
+        status = api_football_get('status')
+        
+        errors = status.get('errors', {})
+        if errors:
+            err_msg = "\n".join([f"{k}: {v}" for k, v in errors.items()])
+            msg = f"❌ *API-Football Error:*\n{err_msg}"
+        else:
+            resp = status.get('response', {})
+            reqs = resp.get('requests', {})
+            current = reqs.get('current', 0)
+            limit = reqs.get('limit_day', 100)
+            
+            sub = resp.get('subscription', {})
+            active = sub.get('active', False)
+            end_date = sub.get('end', 'Unknown')
+            
+            msg = (
+                f"📊 *API-Football Status*\n"
+                f"Status: `{'Active ✅' if active else 'Inactive ❌'}`\n"
+                f"Requests Today: `{current} / {limit}`\n"
+                f"Expires: `{end_date}`\n\n"
+            )
+            
+        msg += (
+            f"🤖 *LLM APIs (Groq & Gemini)*\n"
+            f"Groq & Gemini do not provide direct API endpoints to check billing quotas. "
+            f"Please check your usage manually at:\n"
+            f"• [Groq Console](https://console.groq.com/settings/billing)\n"
+            f"• [Google Cloud Console](https://console.cloud.google.com/)\n"
+        )
+        
+        await update.message.reply_text(msg, parse_mode="Markdown", disable_web_page_preview=True)
+    except Exception as e:
+        await update.message.reply_text(f"❌ Failed to fetch status: {e}")
+
 async def daily_digest_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     if q: await q.answer()

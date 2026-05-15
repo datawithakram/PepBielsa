@@ -12,7 +12,7 @@ from telegram_handlers import (
     show_news, show_press,
     daily_digest_command, handle_followup_question, help_command,
     show_general_news, show_transfers, show_injuries, show_breaking,
-    admin_reset_news,
+    admin_reset_news, admin_status,
 )
 from news_scheduler import register_jobs
 
@@ -45,7 +45,10 @@ async def main():
     app.add_handler(CommandHandler("press", show_press))
     app.add_handler(CommandHandler("daily_digest", daily_digest_command))
     app.add_handler(CommandHandler("help", help_command))
+    
+    # Admin commands
     app.add_handler(CommandHandler("reset_news", admin_reset_news))
+    app.add_handler(CommandHandler("admin_status", admin_status))
 
     # Register callback query handlers
     app.add_handler(CallbackQueryHandler(start,            pattern="^start$"))
