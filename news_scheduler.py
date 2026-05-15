@@ -10,6 +10,7 @@ Jobs registered:
 """
 import logging
 import os
+import html
 from typing import List, Optional
 
 from telegram import Bot
@@ -69,12 +70,12 @@ def _format_caption(item: dict, category: str) -> str:
         except Exception:
             time_display = published_str[:16]
 
-    source = item.get("source", "Unknown")
-    title  = item.get("title", "No title")
+    title  = html.escape(item.get("title", "No title"))
+    source = html.escape(item.get("source", "Unknown"))
     link   = item.get("link", "")
 
     lines = [
-        f"{emoji} *{label}*",
+        f"{emoji} <b>{label}</b>",
         f"",
         f"📰 {title}",
         f"",
@@ -83,7 +84,7 @@ def _format_caption(item: dict, category: str) -> str:
     if time_display:
         lines.append(f"🕐 {time_display}")
     if link:
-        lines.append(f"🔗 [Read more]({link})")
+        lines.append(f"🔗 <a href='{link}'>Read more</a>")
 
     return "\n".join(lines)
 
@@ -99,13 +100,13 @@ async def _send_item(bot: Bot, chat_id: int, item: dict, category: str):
                 chat_id=chat_id,
                 photo=image_url,
                 caption=caption,
-                parse_mode="Markdown",
+                parse_mode="HTML",
             )
         else:
             await bot.send_message(
                 chat_id=chat_id,
                 text=caption,
-                parse_mode="Markdown",
+                parse_mode="HTML",
                 disable_web_page_preview=False,
             )
     except TelegramError as e:
@@ -115,7 +116,7 @@ async def _send_item(bot: Bot, chat_id: int, item: dict, category: str):
             await bot.send_message(
                 chat_id=chat_id,
                 text=caption,
-                parse_mode="Markdown",
+                parse_mode="HTML",
                 disable_web_page_preview=False,
             )
         except TelegramError as e2:
