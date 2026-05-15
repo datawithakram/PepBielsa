@@ -71,6 +71,10 @@ async def main():
     # Register scheduled news jobs
     register_jobs(app)
     
+    if app.job_queue:
+        await app.job_queue.start()
+        logger.info("✅ JobQueue started")
+    
     # ⭐ احذف أي رسائل قديمة معلقة قبل بدء الاستماع
     await app.bot.delete_webhook(drop_pending_updates=True)
     logger.info("✅ Cleared pending updates")
@@ -96,6 +100,8 @@ async def main():
         await asyncio.Event().wait()
     except KeyboardInterrupt:
         logger.info("Shutting down...")
+        if app.job_queue:
+            await app.job_queue.stop()
         await app.updater.stop()
         await app.stop()
         await app.shutdown()
