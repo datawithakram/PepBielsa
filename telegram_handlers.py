@@ -108,38 +108,72 @@ async def analyze_match(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
     match_id = q.data.split("_")[1]
-    await q.edit_message_text("🔄 Analyzing... (may take 30-60s for cold start)")
+    await q.edit_message_text("🔄 Analyzing... (Fetching match data & generating AI report)")
     
     try:
-        api_url = f"{HF_SPACE_URL}/gradio_api/call/run_tactical_analysis"
-        resp = requests.post(api_url, json={"data": [int(match_id), None, None, None]}, timeout=180)
+        from utils import get_match_by_id, get_match_statistics, get_match_events, get_lineups
+        from tactical_engine import compute_tactical_summary
+        from ai_analysis import generate_tactical_report, generate_social_insights
+        from visuals import generate_all_graphics
+        import base64
+        from io import BytesIO
         
-        if resp.status_code != 200:
-            await q.message.reply_text(f"❌ API Error {resp.status_code}")
+        # 1. Fetch data
+        match = get_match_by_id(int(match_id))
+        if not match:
+            await q.message.reply_text(f"❌ Match {match_id} not found.")
             return
+            
+        stats = get_match_statistics(int(match_id))
+        events = get_match_events(int(match_id))
+        lineups = get_lineups(int(match_id))
         
-        data = resp.json()
-        event_id = data.get("event_id")
+        # 2. Compute tactical summary
+        summary = compute_tactical_summary(match, stats, events, lineups)
         
-        if event_id:
-            time.sleep(3)
-            # Poll for result
-            for _ in range(20):
-                r2 = requests.get(f"{api_url}/{event_id}", timeout=60)
-                if r2.status_code == 200:
-                    result = r2.text
-                    if len(result) > 4000:
-                        for i in range(0, len(result), 4000):
-                            await q.message.reply_text(result[i:i+4000], parse_mode="HTML")
-                    else:
-                        await q.message.reply_text(result, parse_mode="HTML")
-                    
-                    set_cache(f"ctx_{update.effective_user.id}", json.dumps({"match_id": match_id}))
-                    await q.message.reply_text("💬 Ask follow-up questions!", reply_markup=main_menu_keyboard())
-                    return
-                time.sleep(2)
+        # 3. AI Report
+        report = generate_tactical_report(summary)
         
-        await q.message.reply_text("❌ Analysis timed out. Try again.")
+        # 4. Social insights
+        try:
+            insights = generate_social_insights(summary)
+        except:
+            insights = []
+            
+        # 5. Format the text for Telegram
+        home = summary['home_team']
+        away = summary['away_team']
+        hs = summary['home_score']
+        as_ = summary['away_score']
+        
+        text_message = f"⚽ *{home} {hs} - {as_} {away}*\n\n"
+        text_message += f"📊 *Tactical Report*\n{report}\n\n"
+        
+        if insights:
+            text_message += f"📱 *Social Insights*\n"
+            for ins in insights:
+                text_message += f"• {ins}\n"
+                
+        # Send text in chunks if it exceeds Telegram limits
+        if len(text_message) > 4000:
+            for i in range(0, len(text_message), 4000):
+                await q.message.reply_text(text_message[i:i+4000], parse_mode="Markdown")
+        else:
+            await q.message.reply_text(text_message, parse_mode="Markdown")
+
+        # 6. Generate and send graphics
+        graphics = generate_all_graphics(summary, lineups, events=events)
+        for name, b64 in graphics.items():
+            try:
+                photo_data = BytesIO(base64.b64decode(b64))
+                await context.bot.send_photo(chat_id=update.effective_chat.id, photo=photo_data)
+            except Exception as e:
+                logger.error(f"Failed to send graphic {name}: {e}")
+
+        # Store context for follow-ups
+        set_cache(f"ctx_{update.effective_user.id}", json.dumps(summary))
+        await q.message.reply_text("💬 Ask a follow-up question!", reply_markup=main_menu_keyboard())
+
     except Exception as e:
         logger.error(f"Analysis failed: {e}")
         await q.message.reply_text(f"❌ Error: {str(e)[:200]}")
@@ -155,21 +189,15 @@ async def handle_followup_question(update: Update, context: ContextTypes.DEFAULT
     
     await update.message.reply_text("🤔 Thinking...")
     try:
-        api_url = f"{HF_SPACE_URL}/gradio_api/call/run_tactical_analysis"
-        resp = requests.post(api_url, json={"data": [0, None, update.message.text, ctx]}, timeout=120)
+        from ai_analysis import answer_followup
         
-        if resp.status_code == 200:
-            data = resp.json()
-            eid = data.get("event_id")
-            if eid:
-                time.sleep(2)
-                r2 = requests.get(f"{api_url}/{eid}", timeout=60)
-                if r2.status_code == 200:
-                    await update.message.reply_text(r2.text[:4000], parse_mode="HTML")
-                    return
-        await update.message.reply_text("Could not process question.")
+        ctx_data = json.loads(ctx)
+        answer = answer_followup(update.message.text, ctx_data)
+        
+        await update.message.reply_text(f"💬 *Answer:*\n{answer}", parse_mode="Markdown")
     except Exception as e:
-        await update.message.reply_text(f"Error: {e}")
+        logger.error(f"Followup failed: {e}")
+        await update.message.reply_text(f"❌ Error: {str(e)[:200]}")
 
 # ── shared helper ────────────────────────────────────────────────────────────
 
