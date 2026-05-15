@@ -49,7 +49,7 @@ async def show_matches(update: Update, context: ContextTypes.DEFAULT_TYPE):
             txt = (
                 f"📅 *{today_str}*\n\n"
                 "⏳ No major matches today in the top competitions.\n"
-                "Use /matches\_all to see all leagues."
+                "Use /matches\\_all to see all leagues."
             )
             if q: await q.edit_message_text(txt, parse_mode="Markdown", reply_markup=main_menu_keyboard())
             else: await update.message.reply_text(txt, parse_mode="Markdown", reply_markup=main_menu_keyboard())
@@ -302,7 +302,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🤖 *PepBielsa — Football Intelligence*\n\n"
         "*📅 Matches*\n"
         "/matches — Major competitions only\n"
-        "/matches\_all — All leagues today\n\n"
+        "/matches\\_all — All leagues today\n\n"
         "*📰 News Feed*\n"
         "/news — News category menu\n"
         "/transfers — Transfer news\n"
@@ -310,9 +310,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/breaking — Breaking news\n"
         "/press — Press conferences\n\n"
         "*📊 Digest*\n"
-        "/daily\_digest — Daily briefing\n\n"
+        "/daily\\_digest — Daily briefing\n\n"
         "*⚙️ Admin*\n"
-        "/reset\_news — Clear news dedup store\n"
+        "/reset\\_news — Clear news dedup store\n"
         "/help — This message"
     )
     if update.message:
