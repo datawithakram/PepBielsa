@@ -6,14 +6,17 @@ import json
 import time
 import logging
 import requests
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
+from telegram.error import TelegramError
 
 HF_SPACE_URL = os.getenv("HF_SPACE_URL", "https://thehnx-pepbielsa.hf.space")
 logger = logging.getLogger(__name__)
 
 from utils import get_today_matches, get_cache, set_cache
-from keyboard import matches_keyboard, main_menu_keyboard
+from keyboard import matches_keyboard, main_menu_keyboard, news_menu_keyboard
+from feed_fetcher import fetch_category
+from news_store import store
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message:
@@ -34,19 +37,70 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def show_matches(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     if q: await q.answer()
+
+    from datetime import date
+    today_str = date.today().strftime("%d %b %Y")
+
     try:
-        fixtures = get_today_matches()
+        fixtures = get_today_matches(major_only=True)
+        count    = len(fixtures)
+
         if not fixtures:
-            txt = "No matches today."
-            if q: await q.edit_message_text(txt)
-            else: await update.message.reply_text(txt)
+            txt = (
+                f"📅 *{today_str}*\n\n"
+                "⏳ No major matches today in the top competitions.\n"
+                "Use /matches\_all to see all leagues."
+            )
+            if q: await q.edit_message_text(txt, parse_mode="Markdown", reply_markup=main_menu_keyboard())
+            else: await update.message.reply_text(txt, parse_mode="Markdown", reply_markup=main_menu_keyboard())
             return
+
+        header = (
+            f"📅 *{today_str} — Major Matches*\n"
+            f"🏆 {count} match{'es' if count != 1 else ''} across top competitions\n"
+            "_Tap a match to get the full tactical analysis_"
+        )
         if q:
-            await q.edit_message_text("⚽ *Today's Matches*:", parse_mode="Markdown", reply_markup=matches_keyboard(fixtures))
+            await q.edit_message_text(header, parse_mode="Markdown", reply_markup=matches_keyboard(fixtures))
         else:
-            await update.message.reply_text("⚽ *Today's Matches*:", parse_mode="Markdown", reply_markup=matches_keyboard(fixtures))
+            await update.message.reply_text(header, parse_mode="Markdown", reply_markup=matches_keyboard(fixtures))
+
     except Exception as e:
-        err = f"Error: {e}"
+        err = f"❌ Error fetching matches: {e}"
+        if q: await q.edit_message_text(err)
+        else: await update.message.reply_text(err)
+
+
+async def show_all_matches(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show ALL today's matches without the major-league filter."""
+    q = update.callback_query
+    if q: await q.answer()
+
+    from datetime import date
+    today_str = date.today().strftime("%d %b %Y")
+
+    try:
+        fixtures = get_today_matches(major_only=False)
+        count    = len(fixtures)
+
+        if not fixtures:
+            txt = f"📅 *{today_str}*\n\nNo matches found at all today."
+            if q: await q.edit_message_text(txt, parse_mode="Markdown", reply_markup=main_menu_keyboard())
+            else: await update.message.reply_text(txt, parse_mode="Markdown", reply_markup=main_menu_keyboard())
+            return
+
+        header = (
+            f"📅 *{today_str} — All Matches*\n"
+            f"⚽ {count} matches (all leagues)\n"
+            "_Tap a match to analyse it_"
+        )
+        if q:
+            await q.edit_message_text(header, parse_mode="Markdown", reply_markup=matches_keyboard(fixtures))
+        else:
+            await update.message.reply_text(header, parse_mode="Markdown", reply_markup=matches_keyboard(fixtures))
+
+    except Exception as e:
+        err = f"❌ Error: {e}"
         if q: await q.edit_message_text(err)
         else: await update.message.reply_text(err)
 
@@ -117,37 +171,118 @@ async def handle_followup_question(update: Update, context: ContextTypes.DEFAULT
     except Exception as e:
         await update.message.reply_text(f"Error: {e}")
 
-async def show_news(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    if q: await q.answer()
+# ── shared helper ────────────────────────────────────────────────────────────
+
+async def _send_news_card(bot, chat_id: int, item: dict, category: str):
+    """Send a single news card (photo + caption or text fallback)."""
+    from news_scheduler import _format_caption
+    caption = _format_caption(item, category)
+    image_url = item.get("image")
     try:
-        from news_engine import get_latest_news
-        news = get_latest_news()
-        if not news:
-            txt = "No news available."
+        if image_url:
+            await bot.send_photo(
+                chat_id=chat_id,
+                photo=image_url,
+                caption=caption,
+                parse_mode="Markdown",
+            )
         else:
-            txt = "📰 *Latest News*\n\n" + "\n".join([f"• {n['title']}" for n in news[:5]])
-        if q: await q.edit_message_text(txt, parse_mode="Markdown", reply_markup=main_menu_keyboard())
-        else: await update.message.reply_text(txt, parse_mode="Markdown", reply_markup=main_menu_keyboard())
-    except Exception as e:
-        err = f"News error: {e}"
-        if q: await q.edit_message_text(err)
-        else: await update.message.reply_text(err)
+            await bot.send_message(
+                chat_id=chat_id,
+                text=caption,
+                parse_mode="Markdown",
+                disable_web_page_preview=False,
+            )
+    except TelegramError:
+        try:
+            await bot.send_message(
+                chat_id=chat_id,
+                text=caption,
+                parse_mode="Markdown",
+                disable_web_page_preview=False,
+            )
+        except TelegramError as e:
+            logger.error(f"Card send failed: {e}")
+
+
+async def show_news(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show news category menu."""
+    q = update.callback_query
+    if q:
+        await q.answer()
+        await q.edit_message_text(
+            "📰 *Choose a news category:*",
+            parse_mode="Markdown",
+            reply_markup=news_menu_keyboard(),
+        )
+    else:
+        await update.message.reply_text(
+            "📰 *Choose a news category:*",
+            parse_mode="Markdown",
+            reply_markup=news_menu_keyboard(),
+        )
+
+
+async def _handle_news_category(update: Update, context: ContextTypes.DEFAULT_TYPE, category: str, label: str):
+    """Fetch and send news items for a given category."""
+    q = update.callback_query
+    chat_id = update.effective_chat.id
+    bot = context.bot
+
+    if q:
+        await q.answer()
+        await q.edit_message_text(f"⏳ Fetching {label}…")
+
+    items = fetch_category(category, max_per_feed=5)
+    if not items:
+        txt = f"No {label} found right now. Try again later."
+        await bot.send_message(chat_id=chat_id, text=txt, reply_markup=main_menu_keyboard())
+        return
+
+    await bot.send_message(
+        chat_id=chat_id,
+        text=f"📋 *Latest {label}* — top {min(len(items), 5)} articles:",
+        parse_mode="Markdown",
+    )
+    for item in items[:5]:
+        await _send_news_card(bot, chat_id, item, category)
+
+    await bot.send_message(
+        chat_id=chat_id,
+        text="↩️ Back to menu:",
+        reply_markup=main_menu_keyboard(),
+    )
+
+
+async def show_general_news(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _handle_news_category(update, context, "general", "Football News")
+
+
+async def show_transfers(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _handle_news_category(update, context, "transfers", "Transfer News")
+
 
 async def show_press(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    if q: await q.answer()
-    try:
-        from press_conference_analyzer import fetch_press_quotes, analyze_quotes
-        quotes = fetch_press_quotes()
-        analyzed = analyze_quotes(quotes)
-        txt = "🎙 *Press Conference*\n\n" + "\n".join([f"*{a['coach']}*: _{a['quote']}_" for a in analyzed])
-        if q: await q.edit_message_text(txt, parse_mode="Markdown", reply_markup=main_menu_keyboard())
-        else: await update.message.reply_text(txt, parse_mode="Markdown", reply_markup=main_menu_keyboard())
-    except Exception as e:
-        err = f"Press error: {e}"
-        if q: await q.edit_message_text(err)
-        else: await update.message.reply_text(err)
+    await _handle_news_category(update, context, "press_conference", "Press Conferences")
+
+
+async def show_injuries(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _handle_news_category(update, context, "injuries", "Injury News")
+
+
+async def show_breaking(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _handle_news_category(update, context, "breaking", "Breaking News")
+
+
+async def admin_reset_news(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command: /reset_news — clears the dedup store."""
+    admin_id = os.getenv("ADMIN_CHAT_ID", "")
+    uid = str(update.effective_user.id)
+    if admin_id and uid != admin_id:
+        await update.message.reply_text("⛔ Not authorised.")
+        return
+    store.reset()
+    await update.message.reply_text("✅ News dedup store cleared. All articles are now 'new' again.")
 
 async def daily_digest_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -163,7 +298,23 @@ async def daily_digest_command(update: Update, context: ContextTypes.DEFAULT_TYP
         else: await update.message.reply_text(err)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    txt = "🤖 *PepBielsa*\n/matches - Today's games\n/news - Latest news\n/daily_digest - Daily briefing\n/help - Help"
+    txt = (
+        "🤖 *PepBielsa — Football Intelligence*\n\n"
+        "*📅 Matches*\n"
+        "/matches — Major competitions only\n"
+        "/matches\_all — All leagues today\n\n"
+        "*📰 News Feed*\n"
+        "/news — News category menu\n"
+        "/transfers — Transfer news\n"
+        "/injuries — Injury updates\n"
+        "/breaking — Breaking news\n"
+        "/press — Press conferences\n\n"
+        "*📊 Digest*\n"
+        "/daily\_digest — Daily briefing\n\n"
+        "*⚙️ Admin*\n"
+        "/reset\_news — Clear news dedup store\n"
+        "/help — This message"
+    )
     if update.message:
         await update.message.reply_text(txt, parse_mode="Markdown", reply_markup=main_menu_keyboard())
     elif update.callback_query:

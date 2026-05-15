@@ -71,11 +71,11 @@ def run_tactical_analysis(
     # Graphics
     graphics_html = ""
     try:
-        graphics = generate_all_graphics(summary, lineups)
+        graphics = generate_all_graphics(summary, lineups, events=events)
         for name, b64 in graphics.items():
-            graphics_html += f'<img src="data:image/png;base64,{b64}" style="max-width:100%;margin:5px 0;"/><br/>'
-    except:
-        graphics_html = "<p>Graphics unavailable</p>"
+            graphics_html += f'<img src="data:image/png;base64,{b64}" style="max-width:100%;margin:10px 0;border-radius:8px;"/><br/>'
+    except Exception as e:
+        graphics_html = f"<p>Graphics unavailable: {e}</p>"
     
     home = summary['home_team']
     away = summary['away_team']

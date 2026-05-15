@@ -62,12 +62,72 @@ def api_football_get(endpoint: str, params: dict = None) -> dict:
     resp.raise_for_status()
     return resp.json()
 
-def get_today_matches() -> list:
-    """Fetch today's fixtures."""
+# ----- Major League / Competition IDs (API-Football) -----
+# Only these leagues/cups will appear in /matches — all others are filtered out.
+MAJOR_LEAGUE_IDS = {
+    # ── UEFA Club Competitions ─────────────────────────
+    2,    # UEFA Champions League
+    3,    # UEFA Europa League
+    848,  # UEFA Conference League
+
+    # ── Top 5 European Leagues ─────────────────────────
+    39,   # Premier League (England)
+    140,  # La Liga (Spain)
+    135,  # Serie A (Italy)
+    78,   # Bundesliga (Germany)
+    61,   # Ligue 1 (France)
+
+    # ── Other Major European Leagues ───────────────────
+    88,   # Eredivisie (Netherlands)
+    94,   # Primeira Liga (Portugal)
+    144,  # Belgian Pro League
+    218,  # Scottish Premiership
+    253,  # MLS (USA)
+    203,  # Süper Lig (Turkey)
+    179,  # Scottish Premiership
+    98,   # J1 League (Japan)
+    169,  # Saudi Pro League
+
+    # ── Domestic Cups (Top 5) ───────────────────────────
+    45,   # FA Cup (England)
+    48,   # EFL Cup / Carabao Cup
+    143,  # Copa del Rey (Spain)
+    137,  # Coppa Italia
+    81,   # DFB-Pokal (Germany)
+    66,   # Coupe de France
+
+    # ── International / World Tournaments ───────────────
+    1,    # FIFA World Cup
+    4,    # UEFA Euro Championship
+    9,    # Copa America
+    10,   # FIFA World Cup Qualification (CONMEBOL)
+    32,   # FIFA World Cup Qualification (UEFA)
+    6,    # Africa Cup of Nations
+    7,    # Asian Cup
+    29,   # FIFA Club World Cup
+    34,   # World Cup (Women)
+}
+
+def get_today_matches(major_only: bool = True) -> list:
+    """Fetch today's fixtures, filtered to major competitions by default."""
     from datetime import date
     today = date.today().strftime("%Y-%m-%d")
-    data = api_football_get("fixtures", {"date": today})
-    return data.get("response", [])
+    data  = api_football_get("fixtures", {"date": today})
+    fixtures = data.get("response", [])
+
+    if major_only:
+        fixtures = [
+            f for f in fixtures
+            if f.get("league", {}).get("id") in MAJOR_LEAGUE_IDS
+        ]
+        # Sort: UCL/UEL/UECL first, then by league id
+        priority = {2: 0, 3: 1, 848: 2, 39: 3, 140: 4, 135: 5, 78: 6, 61: 7}
+        fixtures.sort(key=lambda f: (
+            priority.get(f["league"]["id"], 99),
+            f["fixture"].get("timestamp", 0),
+        ))
+
+    return fixtures
 
 def get_match_by_id(match_id: int) -> dict:
     data = api_football_get("fixtures", {"id": match_id})
@@ -167,5 +227,12 @@ def check_required_env():
     if missing:
         raise EnvironmentError(f"Missing env vars: {missing}")
 
-check_required_env()
-init_hf_storage()
+try:
+    check_required_env()
+except EnvironmentError as e:
+    logger.warning(f"Optional env vars missing (tactical features may be limited): {e}")
+
+try:
+    init_hf_storage()
+except Exception as e:
+    logger.warning(f"HuggingFace storage init skipped: {e}")

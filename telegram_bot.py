@@ -8,9 +8,13 @@ from aiohttp import web
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 from dotenv import load_dotenv
 from telegram_handlers import (
-    start, show_matches, analyze_match, show_news, show_press,
-    daily_digest_command, handle_followup_question, help_command
+    start, show_matches, show_all_matches, analyze_match,
+    show_news, show_press,
+    daily_digest_command, handle_followup_question, help_command,
+    show_general_news, show_transfers, show_injuries, show_breaking,
+    admin_reset_news,
 )
+from news_scheduler import register_jobs
 
 load_dotenv()
 
@@ -33,24 +37,39 @@ async def main():
     # Register command handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("matches", show_matches))
+    app.add_handler(CommandHandler("matches_all", show_all_matches))
     app.add_handler(CommandHandler("news", show_news))
+    app.add_handler(CommandHandler("transfers", show_transfers))
+    app.add_handler(CommandHandler("injuries", show_injuries))
+    app.add_handler(CommandHandler("breaking", show_breaking))
+    app.add_handler(CommandHandler("press", show_press))
     app.add_handler(CommandHandler("daily_digest", daily_digest_command))
     app.add_handler(CommandHandler("help", help_command))
-    
+    app.add_handler(CommandHandler("reset_news", admin_reset_news))
+
     # Register callback query handlers
-    app.add_handler(CallbackQueryHandler(show_matches, pattern="^matches$"))
-    app.add_handler(CallbackQueryHandler(analyze_match, pattern="^analyze_"))
-    app.add_handler(CallbackQueryHandler(show_news, pattern="^news$"))
-    app.add_handler(CallbackQueryHandler(show_press, pattern="^press$"))
+    app.add_handler(CallbackQueryHandler(start,            pattern="^start$"))
+    app.add_handler(CallbackQueryHandler(show_matches,     pattern="^matches$"))
+    app.add_handler(CallbackQueryHandler(analyze_match,    pattern="^analyze_"))
+    app.add_handler(CallbackQueryHandler(show_news,        pattern="^news$"))
+    app.add_handler(CallbackQueryHandler(show_general_news, pattern="^news_general$"))
+    app.add_handler(CallbackQueryHandler(show_transfers,   pattern="^news_transfers$"))
+    app.add_handler(CallbackQueryHandler(show_press,       pattern="^news_press$"))
+    app.add_handler(CallbackQueryHandler(show_injuries,    pattern="^news_injuries$"))
+    app.add_handler(CallbackQueryHandler(show_breaking,    pattern="^news_breaking$"))
+    app.add_handler(CallbackQueryHandler(show_press,       pattern="^press$"))
     app.add_handler(CallbackQueryHandler(daily_digest_command, pattern="^digest$"))
-    app.add_handler(CallbackQueryHandler(help_command, pattern="^help$"))
+    app.add_handler(CallbackQueryHandler(help_command,     pattern="^help$"))
     
     # Register text message handler
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_followup_question))
-    
+
     # 2. Initialize and start bot
     await app.initialize()
     await app.start()
+
+    # Register scheduled news jobs
+    register_jobs(app)
     
     # ⭐ احذف أي رسائل قديمة معلقة قبل بدء الاستماع
     await app.bot.delete_webhook(drop_pending_updates=True)
