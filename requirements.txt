@@ -14,3 +14,8 @@ huggingface_hub
 groq
 aiohttp
 apscheduler
+scipy
+mobfot
+soccerdata
+beautifulsoup4
+understat

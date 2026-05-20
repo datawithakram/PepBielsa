@@ -5,14 +5,15 @@ import os
 import asyncio
 import logging
 from aiohttp import web
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 from dotenv import load_dotenv
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 from telegram_handlers import (
     start, show_matches, show_all_matches, analyze_match,
     show_news, show_press,
     daily_digest_command, handle_followup_question, help_command,
     show_general_news, show_transfers, show_injuries, show_breaking,
-    admin_reset_news, admin_status,
+    admin_reset_news, admin_status, handle_date_callback,
+    custom_drawing_start, handle_custom_callback, handle_photo_upload
 )
 from news_scheduler import register_jobs
 
@@ -31,8 +32,16 @@ async def health_check(request):
 async def main():
     """Start both Telegram bot and health check server."""
     
-    # 1. Initialize Telegram bot
-    app = ApplicationBuilder().token(TOKEN).build()
+    # 1. Initialize Telegram bot with generous timeouts for long AI tasks
+    app = (
+        ApplicationBuilder()
+        .token(TOKEN)
+        .connect_timeout(30)
+        .read_timeout(120)
+        .write_timeout(120)
+        .pool_timeout(30)
+        .build()
+    )
     
     # Register command handlers
     app.add_handler(CommandHandler("start", start))
@@ -45,6 +54,7 @@ async def main():
     app.add_handler(CommandHandler("press", show_press))
     app.add_handler(CommandHandler("daily_digest", daily_digest_command))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("custom", custom_drawing_start))
     
     # Admin commands
     app.add_handler(CommandHandler("reset_news", admin_reset_news))
@@ -53,6 +63,7 @@ async def main():
     # Register callback query handlers
     app.add_handler(CallbackQueryHandler(start,            pattern="^start$"))
     app.add_handler(CallbackQueryHandler(show_matches,     pattern="^matches$"))
+    app.add_handler(CallbackQueryHandler(handle_date_callback, pattern="^date_"))
     app.add_handler(CallbackQueryHandler(analyze_match,    pattern="^analyze_"))
     app.add_handler(CallbackQueryHandler(show_news,        pattern="^news$"))
     app.add_handler(CallbackQueryHandler(show_general_news, pattern="^news_general$"))
@@ -63,9 +74,11 @@ async def main():
     app.add_handler(CallbackQueryHandler(show_press,       pattern="^press$"))
     app.add_handler(CallbackQueryHandler(daily_digest_command, pattern="^digest$"))
     app.add_handler(CallbackQueryHandler(help_command,     pattern="^help$"))
+    app.add_handler(CallbackQueryHandler(handle_custom_callback, pattern="^cust_"))
     
     # Register text message handler
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_followup_question))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo_upload))
 
     # 2. Initialize and start bot
     await app.initialize()

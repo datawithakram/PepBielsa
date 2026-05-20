@@ -18,13 +18,13 @@ from telegram.error import TelegramError
 
 from feed_fetcher import fetch_all, fetch_breaking_alerts
 from news_store import store
-from utils import get_today_matches
+from data_aggregator import aggregator
 
 logger = logging.getLogger(__name__)
 
 # ── config (override via environment) ────────────────────────────────────────
-POLL_INTERVAL_MINUTES    = int(os.getenv("NEWS_POLL_MINUTES", 30))
-BREAKING_INTERVAL_MINUTES = int(os.getenv("BREAKING_POLL_MINUTES", 10))
+POLL_INTERVAL_MINUTES    = int(os.getenv("NEWS_POLL_MINUTES", 10))
+BREAKING_INTERVAL_MINUTES = int(os.getenv("BREAKING_POLL_MINUTES", 1))
 MAX_ITEMS_PER_CATEGORY   = int(os.getenv("NEWS_MAX_PER_CAT", 3))
 MAX_BREAKING_ITEMS       = int(os.getenv("NEWS_MAX_BREAKING", 5))
 
@@ -220,17 +220,16 @@ async def job_check_finished_matches(context):
     logger.info("🏟 Checking for newly finished matches...")
     try:
         # Fetch major matches only
-        matches = get_today_matches(major_only=True)
+        matches = aggregator.get_daily_fixtures(major_only=True)
     except Exception as e:
         logger.error(f"Failed to fetch matches for notification: {e}")
         return
 
     for m in matches:
         match_id = m.get("fixture", {}).get("id")
-        status = m.get("fixture", {}).get("status", {}).get("short")
+        status_type = m.get("fixture", {}).get("status_type")
         
-        # FT: Full Time, AET: After Extra Time, PEN: Penalties
-        if status in ["FT", "AET", "PEN"]:
+        if status_type == "finished":
             dedup_key = f"match_ft_{match_id}"
             
             if not store.is_seen(dedup_key):
