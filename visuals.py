@@ -166,7 +166,7 @@ def _encode(fig, save_path: str = None) -> str:
 # Image 1: Overview
 # Image 1: Overview
 def overview_map(summary: Dict, save_path=None) -> str:
-    pitch = Pitch(pitch_type='statsbomb', pitch_color=BG, line_color=PITCH_LINE, linewidth=1.5)
+    pitch = Pitch(pitch_type='opta', pitch_color=BG, line_color=PITCH_LINE, linewidth=1.5)
     fig, ax = pitch.draw(figsize=(12, 8))
     fig.patch.set_facecolor(BG)
     h_color = summary.get('home_color', HOME_CLR)
@@ -184,36 +184,40 @@ def overview_map(summary: Dict, save_path=None) -> str:
     
     hl = _get_team_logo(summary.get("home_team_id"))
     al = _get_team_logo(summary.get("away_team_id"))
-    if hl: ax.add_artist(AnnotationBbox(OffsetImage(hl.resize((60,60))), (45, 70), frameon=False))
-    if al: ax.add_artist(AnnotationBbox(OffsetImage(al.resize((60,60))), (75, 70), frameon=False))
+    if hl: ax.add_artist(AnnotationBbox(OffsetImage(hl.resize((60,60))), (35, 80), frameon=False))
+    if al: ax.add_artist(AnnotationBbox(OffsetImage(al.resize((60,60))), (65, 80), frameon=False))
     
-    ax.text(45, 60, summary.get('home_team', ''), ha='center', fontsize=12, fontweight='bold', color=TEXT_MAIN)
-    ax.text(75, 60, summary.get('away_team', ''), ha='center', fontsize=12, fontweight='bold', color=TEXT_MAIN)
+    ax.text(35, 70, summary.get('home_team', ''), ha='center', fontsize=12, fontweight='bold', color=TEXT_MAIN)
+    ax.text(65, 70, summary.get('away_team', ''), ha='center', fontsize=12, fontweight='bold', color=TEXT_MAIN)
     
     if hp is not None and ap is not None:
-        ax.text(60, 68, f"Penalties\n{hp} - {ap}", ha='center', va='center', fontsize=11, fontweight='bold', color=TEXT_SEC)
+        ax.text(50, 78, f"Penalties\n{hp} - {ap}", ha='center', va='center', fontsize=11, fontweight='bold', color=TEXT_SEC)
     
     stats = [
         ("GOALS", summary.get('home_score', 0), summary.get('away_score', 0)),
         ("xG", summary.get('match_stats', {}).get('xg', {}).get('home', 0), summary.get('match_stats', {}).get('xg', {}).get('away', 0)),
         ("SHOTS", summary.get('match_stats', {}).get('shots', {}).get('home', {}).get('total', 0), summary.get('match_stats', {}).get('shots', {}).get('away', {}).get('total', 0)),
-        ("ON TARGET", summary.get('match_stats', {}).get('shots', {}).get('home', {}).get('ongoal', 0), summary.get('match_stats', {}).get('shots', {}).get('away', {}).get('ongoal', 0)),
+        ("ON TARGET",
+            summary.get('match_stats', {}).get('shots', {}).get('home', {}).get('on_target',
+            summary.get('match_stats', {}).get('shots', {}).get('home', {}).get('ongoal', 0)),
+            summary.get('match_stats', {}).get('shots', {}).get('away', {}).get('on_target',
+            summary.get('match_stats', {}).get('shots', {}).get('away', {}).get('ongoal', 0))),
         ("POSSESSION", summary.get('match_stats', {}).get('possession', {}).get('home', 0), summary.get('match_stats', {}).get('possession', {}).get('away', 0))
     ]
     
-    y_start = 50
-    y_step = -8
+    y_start = 55
+    y_step = -10
     for i, (label, h, a) in enumerate(stats):
         y = y_start + (i * y_step)
-        ax.add_patch(mpatches.Rectangle((40, y-3), 19, 6, color=h_color, alpha=0.7))
-        ax.add_patch(mpatches.Rectangle((61, y-3), 19, 6, color=a_color, alpha=0.7))
+        ax.add_patch(mpatches.Rectangle((37, y-3.5), 12, 7, color=h_color, alpha=0.7))
+        ax.add_patch(mpatches.Rectangle((51, y-3.5), 12, 7, color=a_color, alpha=0.7))
         
         val_h = f"{_fmt(h)}%" if label == "POSSESSION" else _fmt(h)
         val_a = f"{_fmt(a)}%" if label == "POSSESSION" else _fmt(a)
         
-        ax.text(45, y, val_h, ha='center', va='center', fontsize=12, fontweight='bold', color=TEXT_MAIN)
-        ax.text(60, y, label, ha='center', va='center', fontsize=10, fontweight='bold', color=TEXT_MAIN)
-        ax.text(75, y, val_a, ha='center', va='center', fontsize=12, fontweight='bold', color=TEXT_MAIN)
+        ax.text(43, y, val_h, ha='center', va='center', fontsize=12, fontweight='bold', color=TEXT_MAIN)
+        ax.text(50, y, label, ha='center', va='center', fontsize=10, fontweight='bold', color=TEXT_MAIN)
+        ax.text(57, y, val_a, ha='center', va='center', fontsize=12, fontweight='bold', color=TEXT_MAIN)
 
     shots = summary.get('raw_shotmap', [])
     for shot in shots:
@@ -230,11 +234,11 @@ def overview_map(summary: Dict, save_path=None) -> str:
         s = 50 + (xg * 500)
         
         if is_home:
-            rx = x / 100 * 120
-            ry = 80 - (y / 100 * 80)
+            rx = x
+            ry = 100.0 - y
         else:
-            rx = 120 - (x / 100 * 120)
-            ry = (y / 100) * 80
+            rx = 100.0 - x
+            ry = y
             
         pitch.scatter(rx, ry, ax=ax, color=color, s=s, edgecolors=BG, zorder=5)
 
@@ -242,7 +246,7 @@ def overview_map(summary: Dict, save_path=None) -> str:
 
 # Image 2: Efficiency (Double shot map)
 def efficiency_chart(summary: Dict, save_path=None) -> str:
-    pitch = Pitch(pitch_type='statsbomb', pitch_color=BG, line_color=PITCH_LINE, linewidth=1.5)
+    pitch = Pitch(pitch_type='opta', pitch_color=BG, line_color=PITCH_LINE, linewidth=1.5)
     fig, ax = pitch.draw(figsize=(10, 7))
     fig.patch.set_facecolor(BG)
     h_color = summary.get('home_color', HOME_CLR)
@@ -252,8 +256,8 @@ def efficiency_chart(summary: Dict, save_path=None) -> str:
     
     hl = _get_team_logo(summary.get("home_team_id"))
     al = _get_team_logo(summary.get("away_team_id"))
-    if hl: ax.add_artist(AnnotationBbox(OffsetImage(hl.resize((60,60))), (15, 70), frameon=False, zorder=10))
-    if al: ax.add_artist(AnnotationBbox(OffsetImage(al.resize((60,60))), (105, 70), frameon=False, zorder=10))
+    if hl: ax.add_artist(AnnotationBbox(OffsetImage(hl.resize((60,60))), (15, 85), frameon=False, zorder=10))
+    if al: ax.add_artist(AnnotationBbox(OffsetImage(al.resize((60,60))), (85, 85), frameon=False, zorder=10))
 
     shots = summary.get('raw_shotmap', [])
     for shot in shots:
@@ -263,11 +267,11 @@ def efficiency_chart(summary: Dict, save_path=None) -> str:
         y = shot.get("playerCoordinates", {}).get("y", 0)
         
         if is_home:
-            rx = x / 100 * 120
-            ry = 80 - (y / 100 * 80)
+            rx = x
+            ry = 100.0 - y
         else:
-            rx = 120 - (x / 100 * 120)
-            ry = (y / 100) * 80
+            rx = 100.0 - x
+            ry = y
             
         is_goal = shot.get("shotType") == "goal"
         xg = shot.get("xg", 0.1)
@@ -317,7 +321,14 @@ def xg_flow_chart(summary: Dict, save_path=None) -> str:
     l_team = summary.get(f'{loser}_team', 'Opponent')
     l_color = summary.get(f'{loser}_color', AWAY_CLR if loser == 'away' else HOME_CLR)
     
-    _add_opta_header(fig, f"{w_team} Match Flow", "Rolling 15-Minute xG (For vs Against)")
+    # Compact two-line header to avoid text overlap with chart area
+    fig.text(0.05, 0.96, f"{w_team}  |  Match Flow", fontsize=19, fontweight='900', color=TEXT_MAIN, ha='left', va='top')
+    fig.text(0.05, 0.91, "Rolling 15-min xG — Attacking Threat Over Time", fontsize=10, color=TEXT_SEC, ha='left', va='top')
+    fig.text(0.95, 0.96, "PepBielsa", fontsize=14, fontweight='900', color=MAIN_GREEN, ha='right', va='top')
+    fig.text(0.95, 0.91, "Analyst", fontsize=10, color=TEXT_SEC, ha='right', va='top')
+
+    # Tighten top margin so chart doesn't overlap title
+    plt.subplots_adjust(top=0.84, bottom=0.12, left=0.09, right=0.97)
     
     shots = summary.get('raw_shotmap', [])
     shots.sort(key=lambda x: x.get('time', 0))
@@ -382,7 +393,7 @@ def xg_flow_chart(summary: Dict, save_path=None) -> str:
 
 # Image 4: Formation
 def formation_graphic(summary: Dict, save_path=None) -> str:
-    pitch = Pitch(pitch_type="statsbomb", pitch_color=BG, line_color=PITCH_LINE, linewidth=1.2)
+    pitch = Pitch(pitch_type="opta", pitch_color=BG, line_color=PITCH_LINE, linewidth=1.2)
     fig, ax = pitch.draw(figsize=(14, 10))
     fig.patch.set_facecolor(BG)
     h_color = summary.get('home_color', HOME_CLR)
@@ -428,10 +439,63 @@ def formation_graphic(summary: Dict, save_path=None) -> str:
 
     lineups = ti.get("lineups_full", {})
 
+    def _draw_jersey(ax, cx, cy, color, number, name, is_gk=False):
+        """Draw a football jersey shape with number and player name."""
+        import matplotlib.patches as mp
+        # Use yellow for GK, team color otherwise
+        shirt_color = "#f4c430" if is_gk else color
+        # Determine text color: white if dark shirt, dark if light shirt
+        try:
+            r, g, b = int(shirt_color[1:3], 16), int(shirt_color[3:5], 16), int(shirt_color[5:7], 16)
+            luminance = 0.299*r + 0.587*g + 0.114*b
+            txt_color = "#111827" if luminance > 140 else "#ffffff"
+        except Exception:
+            txt_color = "#ffffff"
+
+        W, H = 6.5, 7.5   # jersey body width / height in opta units
+        sw, sh = 2.8, 2.0  # shoulder tab width / height
+
+        # Jersey body (main rectangle with rounded corners via FancyBboxPatch)
+        body = mp.FancyBboxPatch(
+            (cx - W/2, cy - H/2), W, H,
+            boxstyle="round,pad=0.3",
+            facecolor=shirt_color, edgecolor="white", linewidth=0.8, zorder=5
+        )
+        ax.add_patch(body)
+
+        # Left shoulder tab
+        ls = mp.FancyBboxPatch(
+            (cx - W/2 - sw + 0.5, cy + H/2 - sh + 0.3), sw, sh,
+            boxstyle="round,pad=0.2",
+            facecolor=shirt_color, edgecolor="white", linewidth=0.8, zorder=4
+        )
+        ax.add_patch(ls)
+
+        # Right shoulder tab
+        rs = mp.FancyBboxPatch(
+            (cx + W/2 - 0.5, cy + H/2 - sh + 0.3), sw, sh,
+            boxstyle="round,pad=0.2",
+            facecolor=shirt_color, edgecolor="white", linewidth=0.8, zorder=4
+        )
+        ax.add_patch(rs)
+
+        # Collar (small neck cutout)
+        collar = mp.Ellipse((cx, cy + H/2 - 0.2), 2.2, 1.2,
+                            facecolor=BG, edgecolor="white", linewidth=0.5, zorder=6)
+        ax.add_patch(collar)
+
+        # Number text
+        ax.text(cx, cy + 0.5, str(number), ha='center', va='center',
+                fontsize=11, fontweight='black', color=txt_color, zorder=7)
+
+        # Player name below jersey
+        ax.text(cx, cy - H/2 - 1.5, name, ha='center', va='top',
+                fontsize=7.5, fontweight='bold', color=TEXT_MAIN, zorder=7,
+                bbox=dict(facecolor=BG, alpha=0.72, edgecolor='none', pad=0.8))
+
     def _draw_team(side_data, is_home, color, formation_str):
         players = side_data.get("players", [])[:11]
         
-        # Auto-generate grid based on formation
         if not formation_str: formation_str = "4-4-2"
         try:
             lines = [1] + [int(x) for x in str(formation_str).split('-')]
@@ -451,6 +515,9 @@ def formation_graphic(summary: Dict, save_path=None) -> str:
             for c_val in cols:
                 coords.append((r_val, c_val))
                 
+        # Identify GK (first player in home lineup = row_index 0)
+        gk_index = 0
+
         for i, p in enumerate(players):
             p_obj = p.get("player", {}) if "player" in p else p
             
@@ -464,19 +531,19 @@ def formation_graphic(summary: Dict, save_path=None) -> str:
                 row, col = coords[i] if i < len(coords) else (5, 5)
                 
             try:
-                px = 10 + (row * 4.5) if is_home else 110 - (row * 4.5)
-                py = (col - 1) * 10
-                
-                px = max(5, min(px, 115))
-                py = max(5, min(py, 75))
+                px = 8 + (row * 4.0) if is_home else 92 - (row * 4.0)
+                py = (col - 1) * 11 + 6
+                px = max(6, min(px, 94))
+                py = max(6, min(py, 94))
                 
                 number = p.get("shirtNumber", "")
-                ax.add_patch(mpatches.Circle((px, py), 2.5, color=color, zorder=5))
-                ax.add_patch(mpatches.Circle((px, py), 2.5, color=BG, zorder=6, fill=False, lw=1.5))
-                ax.text(px, py, str(number), ha='center', va='center', fontsize=10, fontweight='bold', color=TEXT_MAIN, zorder=7)
+                name_full = p_obj.get("shortName", p_obj.get("name", ""))
+                # Shorten name: keep first letter of first name + last name
+                parts = name_full.split()
+                short_name = (parts[0][0] + ". " + " ".join(parts[1:])) if len(parts) > 1 else name_full
                 
-                name = p_obj.get("shortName", p_obj.get("name", ""))
-                ax.text(px, py-4.5, name, ha='center', va='top', fontsize=9, fontweight='bold', color=TEXT_MAIN, bbox=dict(facecolor=BG, alpha=0.7, edgecolor='none', pad=1))
+                is_gk = (i == gk_index)
+                _draw_jersey(ax, px, py, color, number, short_name, is_gk=is_gk)
             except Exception: pass
 
     if lineups.get("home"): _draw_team(lineups["home"], True, h_color, form_h)
@@ -525,9 +592,9 @@ def goal_post_map(summary: Dict, save_path=None) -> str:
         ax.plot(3.66 + 0.6*np.cos(theta2), 2.44 + 0.6*np.sin(theta2), color=GOLD, linestyle='--', lw=1, alpha=0.6, zorder=2)
             
         ax.set_aspect('equal')
-        # Tightened padding to make the goalposts render larger on the canvas!
-        ax.set_xlim(-4.8, 4.8)
-        ax.set_ylim(-0.6, 3.5)
+        # Wider xlim so goal posts appear larger and well-proportioned
+        ax.set_xlim(-5.8, 5.8)
+        ax.set_ylim(-0.8, 4.2)
         ax.axis('off')
         
         team_shots = [s for s in shots if s.get('isHome', True) == is_home and 'goalMouthCoordinates' in s]
@@ -623,7 +690,7 @@ def assist_map(summary: Dict, save_path=None) -> str:
                 pass
         return ""
         
-    pitch = Pitch(pitch_type='statsbomb', pitch_color=BG, line_color=PITCH_LINE, linewidth=1.5)
+    pitch = Pitch(pitch_type='opta', pitch_color=BG, line_color=PITCH_LINE, linewidth=1.5)
     fig, ax = pitch.draw(figsize=(12, 8))
     fig.patch.set_facecolor(BG)
     
@@ -636,11 +703,11 @@ def assist_map(summary: Dict, save_path=None) -> str:
         color = h_color if a['is_home'] else a_color
         
         # SofaScore coordinates are absolute (0 to 100)
-        # Statsbomb coordinates are 120 x 80
-        x1 = a['start_x'] / 100 * 120
-        y1 = 80 - (a['start_y'] / 100 * 80)
-        x2 = a['end_x'] / 100 * 120
-        y2 = 80 - (a['end_y'] / 100 * 80)
+        # Opta coordinates are 100 x 100
+        x1 = a['start_x']
+        y1 = 100.0 - a['start_y']
+        x2 = a['end_x']
+        y2 = 100.0 - a['end_y']
         
         # Draw pass arrow
         pitch.arrows(x1, y1, x2, y2, ax=ax, width=3, headwidth=6, color=color, zorder=2, alpha=0.8)
@@ -1076,7 +1143,7 @@ def big_chances_chart(summary: Dict, save_path=None) -> str:
 
 # Image 12: Heatmap Zones (32-Zone Team Territory Dominance Map)
 def danger_chart(summary: Dict, save_path=None) -> str:
-    pitch = Pitch(pitch_type="statsbomb", pitch_color=BG, line_color=PITCH_LINE, linewidth=1.5)
+    pitch = Pitch(pitch_type="opta", pitch_color=BG, line_color=PITCH_LINE, linewidth=1.5)
     fig, ax = pitch.draw(figsize=(12, 8))
     fig.patch.set_facecolor(BG)
     _add_opta_header(fig, "Team Territory Map", "Pitch Dominance & Zone Control (32 Spatial Zones)")
@@ -1085,8 +1152,8 @@ def danger_chart(summary: Dict, save_path=None) -> str:
     a_color = summary.get('away_color', AWAY_CLR)
     
     cols, rows = 8, 4
-    x_step = 120 / cols
-    y_step = 80 / rows
+    x_step = 100.0 / cols
+    y_step = 100.0 / rows
     
     # Grid of home and away points count
     home_grid = np.zeros((rows, cols))
@@ -1111,12 +1178,12 @@ def danger_chart(summary: Dict, save_path=None) -> str:
             x = pt.get('x', 50)
             y = pt.get('y', 50)
             
-            # Map to absolute StatsBomb pitch coordinates
+            # Map to absolute Opta pitch coordinates
             if team == 'home':
-                abs_x = (x / 100.0) * 120.0
+                abs_x = x
             else:
-                abs_x = ((100.0 - x) / 100.0) * 120.0
-            abs_y = (y / 100.0) * 80.0
+                abs_x = 100.0 - x
+            abs_y = 100.0 - y
             
             c = int(abs_x / x_step)
             r = int(abs_y / y_step)
@@ -1209,7 +1276,7 @@ def buildup_chart(summary: Dict, save_path=None) -> str:
     lineups = summary.get("tactical_intelligence", {}).get("lineups_full", {}) or summary.get("lineups_full", {})
     
     # Set up Pitch and side-by-side vertical layout
-    pitch = VerticalPitch(pitch_type='statsbomb', pitch_color=BG, line_color=PITCH_LINE, linewidth=1.5)
+    pitch = VerticalPitch(pitch_type='opta', pitch_color=BG, line_color=PITCH_LINE, linewidth=1.5)
     fig, axes = plt.subplots(1, 2, figsize=(15, 10))
     fig.patch.set_facecolor(BG)
     
@@ -1225,8 +1292,8 @@ def buildup_chart(summary: Dict, save_path=None) -> str:
     
     if not lineups:
         # Fallback to empty network message if no lineups
-        axes[0].text(40, 60, "No passing network data available", ha='center', va='center', fontsize=16, color=TEXT_SEC)
-        axes[1].text(40, 60, "No passing network data available", ha='center', va='center', fontsize=16, color=TEXT_SEC)
+        axes[0].text(50, 50, "No passing network data available", ha='center', va='center', fontsize=16, color=TEXT_SEC)
+        axes[1].text(50, 50, "No passing network data available", ha='center', va='center', fontsize=16, color=TEXT_SEC)
         _add_team_legend(fig, summary, h_color, a_color, y_pos=0.03)
         return _encode(fig, save_path)
         
@@ -1242,15 +1309,15 @@ def buildup_chart(summary: Dict, save_path=None) -> str:
         if avg_item:
             ax_val = avg_item.get("averageX", 50)
             ay_val = avg_item.get("averageY", 50)
-            # Scale SofaScore (0-100) to StatsBomb (120x80)
-            px = ax_val / 100 * 120
-            py = (100.0 - ay_val) / 100.0 * 80.0
+            # Scale SofaScore (0-100) to Opta (100x100)
+            px = ax_val
+            py = 100.0 - ay_val
         else:
             # Fallback based on lineup index
             row_idx = i // 3 + 1
             col_idx = (i % 3) * 2 + 2
-            px = 10 + row_idx * 15
-            py = 80 - col_idx * 10
+            px = 10 + row_idx * 12
+            py = 100 - col_idx * 12
             
         home_starters.append({
             "id": p_id, "name": name, "number": number, "x": px, "y": py
@@ -1268,14 +1335,14 @@ def buildup_chart(summary: Dict, save_path=None) -> str:
         if avg_item:
             ax_val = avg_item.get("averageX", 50)
             ay_val = avg_item.get("averageY", 50)
-            # Scale SofaScore (0-100) to StatsBomb (120x80)
-            px = ax_val / 100 * 120
-            py = (100.0 - ay_val) / 100.0 * 80.0
+            # Scale SofaScore (0-100) to Opta (100x100)
+            px = ax_val
+            py = 100.0 - ay_val
         else:
             row_idx = i // 3 + 1
             col_idx = (i % 3) * 2 + 2
-            px = 10 + row_idx * 15
-            py = 80 - col_idx * 10
+            px = 10 + row_idx * 12
+            py = 100 - col_idx * 12
             
         away_starters.append({
             "id": p_id, "name": name, "number": number, "x": px, "y": py
@@ -1336,16 +1403,16 @@ def buildup_chart(summary: Dict, save_path=None) -> str:
     _draw_vertical_network(axes[0], home_starters, home_lookup, h_color)
     _draw_vertical_network(axes[1], away_starters, away_lookup, a_color)
     
-    # Add Team Logos and Names at the top (opponent box area)
+    # Add Team Logos and Names at the top (opponent box area inside 100x100 space)
     logo_h = _get_team_logo(summary.get("home_team_id"))
     if logo_h:
-        axes[0].add_artist(AnnotationBbox(OffsetImage(logo_h.resize((50, 50))), (40, 102), frameon=False, zorder=10))
-    axes[0].text(40, 113, summary.get('home_team', '').upper(), color=TEXT_MAIN, fontsize=14, fontweight='900', ha='center', va='center', zorder=10)
+        axes[0].add_artist(AnnotationBbox(OffsetImage(logo_h.resize((50, 50))), (50, 85), frameon=False, zorder=10))
+    axes[0].text(50, 94, summary.get('home_team', '').upper(), color=TEXT_MAIN, fontsize=14, fontweight='900', ha='center', va='center', zorder=10)
     
     logo_a = _get_team_logo(summary.get("away_team_id"))
     if logo_a:
-        axes[1].add_artist(AnnotationBbox(OffsetImage(logo_a.resize((50, 50))), (40, 102), frameon=False, zorder=10))
-    axes[1].text(40, 113, summary.get('away_team', '').upper(), color=TEXT_MAIN, fontsize=14, fontweight='900', ha='center', va='center', zorder=10)
+        axes[1].add_artist(AnnotationBbox(OffsetImage(logo_a.resize((50, 50))), (50, 85), frameon=False, zorder=10))
+    axes[1].text(50, 94, summary.get('away_team', '').upper(), color=TEXT_MAIN, fontsize=14, fontweight='900', ha='center', va='center', zorder=10)
     
     _add_team_legend(fig, summary, h_color, a_color, y_pos=0.03)
     return _encode(fig, save_path)
@@ -1399,7 +1466,7 @@ def cumulative_xg_chart(summary: Dict, save_path=None) -> str:
     a_pcts = _get_pcts(away_attack)
     
     # Draw side-by-side vertical half-pitches
-    pitch = VerticalPitch(pitch_type='statsbomb', pitch_color=BG, line_color=PITCH_LINE, linewidth=1.5, half=True)
+    pitch = VerticalPitch(pitch_type='opta', pitch_color=BG, line_color=PITCH_LINE, linewidth=1.5, half=True)
     
     # Create axes raised up a lot (bottom coordinate changed from 0.15 to 0.28, height is 0.58)
     ax_h = fig.add_axes([0.08, 0.28, 0.40, 0.58])
@@ -1410,9 +1477,9 @@ def cumulative_xg_chart(summary: Dict, save_path=None) -> str:
     
     def _draw_team_zones(ax_obj, pcts, color):
         zones = [
-            ("left", 0, 26.6, "LEFT FLANK"),
-            ("center", 26.6, 53.3, "CENTER"),
-            ("right", 53.3, 80, "RIGHT FLANK")
+            ("left", 0, 33.3, "LEFT FLANK"),
+            ("center", 33.3, 66.6, "CENTER"),
+            ("right", 66.6, 100, "RIGHT FLANK")
         ]
         
         max_side = max(pcts, key=pcts.get)
@@ -1427,13 +1494,13 @@ def cumulative_xg_chart(summary: Dict, save_path=None) -> str:
             lw = 1.5 if is_max else 0
             
             # Rectangle: min_y, min_x, width_y, height_x
-            rect = mpatches.Rectangle((y_min, 60), y_max - y_min, 60, facecolor=color, alpha=alpha, edgecolor=edgecolor, lw=lw, zorder=2)
+            rect = mpatches.Rectangle((y_min, 50), y_max - y_min, 50, facecolor=color, alpha=alpha, edgecolor=edgecolor, lw=lw, zorder=2)
             ax_obj.add_patch(rect)
             
             # Draw labels & percentages
             y_center = y_min + (y_max - y_min) / 2
-            ax_obj.text(y_center, 90, f"{pct:.0f}%", color='#ffffff', fontsize=22, ha='center', va='center', fontweight='black', zorder=4)
-            ax_obj.text(y_center, 78, label, color=TEXT_SEC, fontsize=9, ha='center', va='center', fontweight='bold', alpha=0.8, zorder=4)
+            ax_obj.text(y_center, 78, f"{pct:.0f}%", color='#ffffff', fontsize=22, ha='center', va='center', fontweight='black', zorder=4)
+            ax_obj.text(y_center, 68, label, color=TEXT_SEC, fontsize=9, ha='center', va='center', fontweight='bold', alpha=0.8, zorder=4)
             
     _draw_team_zones(ax_h, h_pcts, h_color)
     _draw_team_zones(ax_a, a_pcts, a_color)

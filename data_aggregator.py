@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 class DataAggregator:
     def __init__(self):
-        self.base_url = "https://api.sofascore.com/api/v1"
+        self.base_url = "https://api.sofascore.app/api/v1"
         self.session = requests.Session()
         # No need for complex manual headers, curl_cffi handles it via impersonate
 
@@ -119,10 +119,13 @@ class DataAggregator:
                         try:
                             hm_url = f"{self.base_url}/event/{event_id}/player/{p_id}/heatmap"
                             hm_resp = self.session.get(hm_url, impersonate="chrome124", timeout=10)
-                            if hm_resp.status_code == 200:
-                                heatmap_points = hm_resp.json().get("heatmap", [])
-                        except Exception as e:
-                            logger.warning(f"Could not fetch heatmap for player {p_id}: {e}")
+                            if hm_resp.status_code == 200 and hm_resp.content:
+                                try:
+                                    heatmap_points = hm_resp.json().get("heatmap", []) or []
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
                             
                     player_stats.append({
                         "id": p.get("id"),

@@ -33,7 +33,20 @@ def compute_tactical_summary_from_scraping(raw: Dict) -> Dict[str, Any]:
     # ─── 1. MATCH DATA ───
     poss = [_parse_val(v) for v in _get_ss_stat(sd, "Ball possession")]
     shots = [_parse_val(v) for v in _get_ss_stat(sd, "Total shots")]
+    # Try multiple names SofaScore uses for "shots on target"
     shots_on = [_parse_val(v) for v in _get_ss_stat(sd, "Shots on target")]
+    if sum(shots_on) == 0:
+        shots_on = [_parse_val(v) for v in _get_ss_stat(sd, "Shots on Goal")]
+    if sum(shots_on) == 0:
+        shots_on = [_parse_val(v) for v in _get_ss_stat(sd, "Shots On Target")]
+    if sum(shots_on) == 0:
+        shots_on = [_parse_val(v) for v in _get_ss_stat(sd, "Shots on goal")]
+    if sum(shots_on) == 0:
+        # Compute from raw shotmap: shotType "save" or "goal" = on target
+        raw_sm = raw.get("shotmap", [])
+        h_on = sum(1 for s in raw_sm if s.get("isHome") and s.get("shotType") in ("save", "goal") and s.get("situation") != "shootout")
+        a_on = sum(1 for s in raw_sm if not s.get("isHome") and s.get("shotType") in ("save", "goal") and s.get("situation") != "shootout")
+        shots_on = [float(h_on), float(a_on)]
     xg = [_parse_val(v) for v in _get_ss_stat(sd, "Expected goals")]
     if sum(xg) == 0:
         xg = [_parse_val(v) for v in _get_ss_stat(sd, "Expected goals (xG)")]

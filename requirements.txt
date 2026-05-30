@@ -1,21 +1,26 @@
-gradio>=4.0.0
-requests
-python-dotenv
-pandas
-numpy
-matplotlib
-seaborn
-mplsoccer
-Pillow
-google-generativeai
-python-telegram-bot[job-queue]
-feedparser
-huggingface_hub
-groq
-aiohttp
-apscheduler
-scipy
-mobfot
-soccerdata
-beautifulsoup4
-understat
+# PepBielsa Bot — Production Dependencies
+# ─────────────────────────────────────────
+# Core Telegram
+python-telegram-bot[job-queue]>=21.0
+
+# Web server (health check for Render/Railway)
+aiohttp>=3.9.0
+
+# HTTP scraping (SofaScore impersonation)
+curl_cffi>=0.6.0
+
+# AI / ML
+google-generativeai>=0.5.0
+
+# Data & Visualization
+numpy>=1.24.0
+matplotlib>=3.7.0
+seaborn>=0.13.0
+mplsoccer>=1.2.0
+Pillow>=10.0.0
+scipy>=1.10.0
+
+# Utilities
+python-dotenv>=1.0.0
+feedparser>=6.0.0
+beautifulsoup4>=4.12.0

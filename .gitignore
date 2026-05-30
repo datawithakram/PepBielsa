@@ -1,9 +1,38 @@
+# ─── Secrets ────────────────────────────────────────
 .env
+*.env
+
+# ─── Python ──────────────────────────────────────────
 __pycache__/
 *.pyc
-temp/*
-outputs/*
-data/*
-!temp/.gitkeep
-!outputs/.gitkeep
-!data/.gitkeep
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# ─── Generated / Temporary Files ─────────────────────
+scratch/
+outputs/
+temp/
+data/seen_articles.json
+
+# ─── Test & Debug Scripts ────────────────────────────
+test_*.py
+temp_*.py
+find_match.py
+generate_wc_final.py
+generate_readme_assets.py
+search_results.json
+*.png
+*.jpg
+!assets/banner.png
+
+# ─── OS / IDE ────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo

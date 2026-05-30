@@ -1,119 +1,81 @@
 """
-Gradio application for Hugging Face Spaces.
-Simple API for tactical analysis.
+app.py — PepBielsa Health Check Server
+Provides a lightweight HTTP server for uptime monitoring (UptimeRobot / BetterStack).
+The actual Telegram bot runs via telegram_bot.py.
+This file exposes /health and / endpoints so the server stays "awake" on free hosts.
 """
 import os
-import json
-import base64
 import logging
-from typing import Dict, Optional
-from io import BytesIO
-import gradio as gr
-
-from utils import get_match_by_id, get_match_statistics, get_match_events, get_lineups
-from tactical_engine import compute_tactical_summary
-from ai_analysis import generate_tactical_report, generate_social_insights, answer_followup
-from visuals import generate_all_graphics
+from aiohttp import web
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def run_tactical_analysis(
-    match_id: int = 0,
-    image=None,
-    question: Optional[str] = None,
-    match_context: Optional[str] = None
-) -> str:
-    """Main analysis function."""
-    
-    # Q&A mode
-    if question and match_context:
-        try:
-            ctx = json.loads(match_context) if isinstance(match_context, str) else match_context
-            answer = answer_followup(question, ctx)
-            return f"<div style='padding:20px;color:white;'><h3>Answer</h3><p>{answer}</p></div>"
-        except Exception as e:
-            return f"<p style='color:red;'>Q&A Error: {e}</p>"
-    
-    if match_id == 0:
-        return "<p style='color:orange;'>Enter a Match ID to analyze.</p>"
-    
-    # Fetch data
-    try:
-        match = get_match_by_id(int(match_id))
-        if not match:
-            return f"<p style='color:red;'>Match {match_id} not found.</p>"
-        
-        stats = get_match_statistics(int(match_id))
-        events = get_match_events(int(match_id))
-        lineups = get_lineups(int(match_id))
-    except Exception as e:
-        return f"<p style='color:red;'>Data fetch error: {e}</p>"
-    
-    # Tactical engine
-    try:
-        summary = compute_tactical_summary(match, stats, events, lineups)
-    except Exception as e:
-        return f"<p style='color:red;'>Tactical engine error: {e}</p>"
-    
-    # AI Report
-    try:
-        report = generate_tactical_report(summary)
-    except Exception as e:
-        return f"<p style='color:red;'>AI error: {e}</p>"
-    
-    # Social insights
-    try:
-        insights = generate_social_insights(summary)
-    except:
-        insights = []
-    
-    # Graphics
-    graphics_html = ""
-    try:
-        graphics = generate_all_graphics(summary, lineups, events=events)
-        for name, b64 in graphics.items():
-            graphics_html += f'<img src="data:image/png;base64,{b64}" style="max-width:100%;margin:10px 0;border-radius:8px;"/><br/>'
-    except Exception as e:
-        graphics_html = f"<p>Graphics unavailable: {e}</p>"
-    
-    home = summary['home_team']
-    away = summary['away_team']
-    hs = summary['home_score']
-    as_ = summary['away_score']
-    
-    return f"""
-    <div style='font-family:sans-serif;color:white;max-width:800px;'>
-        <h2>⚽ {home} {hs} - {as_} {away}</h2>
-        <div style='background:#1a1a2e;padding:15px;border-radius:8px;margin:10px 0;'>
-            <h3>📊 Tactical Report</h3>
-            <pre style='white-space:pre-wrap;'>{report}</pre>
-        </div>
-        <div style='background:#1a1a2e;padding:15px;border-radius:8px;margin:10px 0;'>
-            <h3>📱 Social Insights</h3>
-            {''.join(f'<p>• {s}</p>' for s in insights)}
-        </div>
-        <div style='background:#1a1a2e;padding:15px;border-radius:8px;margin:10px 0;'>
-            <h3>📈 Graphics</h3>
-            {graphics_html}
-        </div>
-    </div>
-    """
+PORT = int(os.getenv("PORT", 10000))
 
-# Simple Gradio interface
-demo = gr.Interface(
-    fn=run_tactical_analysis,
-    inputs=[
-        gr.Number(label="Match ID", precision=0),
-        gr.Image(label="Upload Screenshot (optional)", type="pil"),
-        gr.Textbox(label="Question (for Q&A mode)", visible=False),
-        gr.Textbox(label="Context", visible=False)
-    ],
-    outputs=gr.HTML(label="Analysis Results"),
-    title="PepBielsa - AI Football Tactical Intelligence",
-    description="Enter a Match ID from API-Football to get tactical analysis.",
-    theme="soft"
-)
+
+async def health_check(request):
+    """Health check endpoint — used by UptimeRobot to keep the server alive."""
+    return web.Response(
+        text=(
+            "✅ PepBielsa Bot — Online\n"
+            "Tactical AI Engine: Running\n"
+            "Data Source: SofaScore\n"
+            "Status: Polling active"
+        ),
+        content_type="text/plain",
+    )
+
+
+async def index(request):
+    """Root index page with basic bot info."""
+    html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>PepBielsa Bot — Status</title>
+  <style>
+    body { background: #111827; color: #F9FAFB; font-family: Inter, sans-serif;
+           display: flex; align-items: center; justify-content: center;
+           min-height: 100vh; margin: 0; }
+    .card { background: #1F2937; border-radius: 16px; padding: 48px 56px;
+            max-width: 520px; text-align: center; border: 1px solid #374151; }
+    h1 { color: #00A86B; font-size: 2rem; margin: 0 0 8px; }
+    .badge { display: inline-block; background: #065F46; color: #6EE7B7;
+             border-radius: 999px; padding: 4px 16px; font-size: 0.85rem;
+             font-weight: 600; margin-bottom: 24px; }
+    p { color: #9CA3AF; line-height: 1.7; }
+    .stat { display: flex; justify-content: space-between;
+            border-top: 1px solid #374151; padding: 10px 0; font-size: 0.9rem; }
+    .stat-label { color: #6B7280; }
+    .stat-value { color: #F4B400; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>⚽ PepBielsa AI</h1>
+    <div class="badge">● Online</div>
+    <p>Elite Football Tactical Intelligence Bot — powered by SofaScore data and Gemini AI.</p>
+    <div class="stat"><span class="stat-label">Data Source</span><span class="stat-value">SofaScore</span></div>
+    <div class="stat"><span class="stat-label">AI Engine</span><span class="stat-value">Gemini 2.5 Flash</span></div>
+    <div class="stat"><span class="stat-label">Sections / Match</span><span class="stat-value">14 Sections</span></div>
+    <div class="stat"><span class="stat-label">Custom Visuals</span><span class="stat-value">9 Chart Types</span></div>
+    <div class="stat"><span class="stat-label">Mode</span><span class="stat-value">Long Polling</span></div>
+  </div>
+</body>
+</html>"""
+    return web.Response(text=html, content_type="text/html")
+
+
+def create_app() -> web.Application:
+    """Create and configure the aiohttp web application."""
+    app = web.Application()
+    app.router.add_get("/", index)
+    app.router.add_get("/health", health_check)
+    return app
+
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    # Standalone run (for local testing only — normally called from telegram_bot.py)
+    web.run_app(create_app(), host="0.0.0.0", port=PORT)
