@@ -1,14 +1,13 @@
 """
-Football News Intelligence – fetches RSS feeds, summarizes with Groq,
-extracts tactical implications, stores in HF dataset.
+news_engine.py — Football News Intelligence
+Fetches RSS feeds and provides news summaries.
 """
 import os
 import json
+import logging
 import feedparser
 from typing import List, Dict
-import logging
-from utils import save_json_to_storage, load_json_from_storage
-from ai_analysis import summarize_news  # Correct import
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +17,27 @@ RSS_FEEDS = [
     "https://www.espn.com/espn/rss/soccer/news",
 ]
 
-def fetch_recent_news(max_per_feed=3) -> List[Dict]:
+_CACHE_FILE = Path("data") / "news_cache.json"
+
+
+def _load_cache() -> List[Dict]:
+    try:
+        if _CACHE_FILE.exists():
+            return json.loads(_CACHE_FILE.read_text())
+    except Exception:
+        pass
+    return []
+
+
+def _save_cache(data: List[Dict]):
+    try:
+        _CACHE_FILE.parent.mkdir(exist_ok=True)
+        _CACHE_FILE.write_text(json.dumps(data, ensure_ascii=False))
+    except Exception as e:
+        logger.warning(f"Cache save failed: {e}")
+
+
+def fetch_recent_news(max_per_feed: int = 3) -> List[Dict]:
     """Fetch latest football news from RSS feeds."""
     articles = []
     for url in RSS_FEEDS:
@@ -26,52 +45,22 @@ def fetch_recent_news(max_per_feed=3) -> List[Dict]:
             feed = feedparser.parse(url)
             for entry in feed.entries[:max_per_feed]:
                 articles.append({
-                    "title": entry.title,
+                    "title":   entry.get("title", ""),
                     "summary": entry.get("summary", ""),
-                    "link": entry.link,
-                    "source": url
+                    "link":    entry.get("link", ""),
+                    "source":  url,
                 })
         except Exception as e:
             logger.warning(f"RSS parse error {url}: {e}")
     return articles
 
-def process_news(articles: List[Dict]) -> List[Dict]:
-    """Summarize each article and extract tactical implications."""
-    processed = []
-    for art in articles:
-        try:
-            text = f"{art['title']}\n{art['summary']}"
-            result = summarize_news(text)
-            processed.append({
-                "title": art["title"],
-                "link": art["link"],
-                "summary": result.get("summary", ""),
-                "tactical_implication": result.get("tactical_implication", "")
-            })
-        except Exception as e:
-            logger.error(f"News processing failed: {e}")
-            processed.append({
-                "title": art["title"],
-                "link": art["link"],
-                "summary": art.get("summary", "")[:200],
-                "tactical_implication": "Analysis unavailable"
-            })
-    
-    # Save to storage
-    try:
-        save_json_to_storage(processed, "news_cache/latest_news.json")
-    except:
-        pass
-    
-    return processed
 
-def get_latest_news(force_refresh=False) -> List[Dict]:
+def get_latest_news(force_refresh: bool = False) -> List[Dict]:
+    """Return cached news or fetch fresh articles."""
     if not force_refresh:
-        try:
-            cached = load_json_from_storage("news_cache/latest_news.json")
-            if cached:
-                return cached
-        except:
-            pass
+        cached = _load_cache()
+        if cached:
+            return cached
     articles = fetch_recent_news()
-    return process_news(articles)
+    _save_cache(articles)
+    return articles

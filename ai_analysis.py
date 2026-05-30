@@ -1,7 +1,6 @@
 """
 ai_analysis.py — Elite Football Match Analysis Engine
-Produces deep, structured, professional match reports across 14 sections.
-Style: Tifo Football / The Athletic / Opta Analyst / StatsBomb.
+Uses Groq (free, fast) for 14-section reports with Gemini as optional enhancer.
 """
 import os
 import json
@@ -10,16 +9,12 @@ import logging
 import time
 from typing import List, Dict, Optional, Any
 
-import groq
-from groq import Groq
 from dotenv import load_dotenv
-
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-client = Groq(api_key=GROQ_API_KEY)
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
 PRIMARY_MODEL   = "llama-3.3-70b-versatile"
 FALLBACK_MODELS = ["qwen/qwen3-32b", "mixtral-8x7b-32768"]
@@ -32,10 +27,33 @@ ANALYST_SYSTEM = (
     "Language: English (Formal/Analytical). Tone: professional, intelligent, tactical, concise but insightful."
 )
 
-# ─── Core LLM wrapper ─────────────────────────────────────────────────────────
+# ─── Lazy Groq client (only created when needed, avoids import-time crash) ─────
+
+_groq_client = None
+
+def _get_groq_client():
+    global _groq_client
+    if _groq_client is None:
+        if not GROQ_API_KEY:
+            raise RuntimeError("GROQ_API_KEY environment variable is not set.")
+        try:
+            from groq import Groq
+            _groq_client = Groq(api_key=GROQ_API_KEY)
+        except ImportError:
+            raise RuntimeError("groq package not installed. Add 'groq' to requirements.txt")
+    return _groq_client
+
+
+# ─── Core LLM wrapper ──────────────────────────────────────────────────────────
 
 def _call_groq(messages: List[Dict], model: str, temperature=0.65,
                max_tokens=1500, retries=2) -> Optional[str]:
+    try:
+        client = _get_groq_client()
+    except RuntimeError as e:
+        logger.error(f"Groq client error: {e}")
+        return None
+
     for attempt in range(retries + 1):
         try:
             completion = client.chat.completions.create(
@@ -69,14 +87,12 @@ def groq_complete(prompt: str, system: str = ANALYST_SYSTEM,
         result = _call_groq(messages, fallback, max_tokens=max_tokens)
         if result:
             return result
-    raise RuntimeError("All Groq models failed.")
+    return "⚠️ Analysis temporarily unavailable. Please try again shortly."
 
 
-# ─── Context builder (FIXED — uses tactical_engine output keys) ───────────────
+# ─── Context builder ──────────────────────────────────────────────────────────
 
 def _build_context_block(s: Dict) -> str:
-    """Compress the preprocessed tactical summary into a LLM-ready context block."""
-    # ── Resolve nested structures safely ─────────────────────────────────────
     ms   = s.get("match_stats", {})
     ti   = s.get("tactical_intelligence", {})
     fm   = ti.get("formations") or s.get("formations", {})
@@ -95,7 +111,6 @@ def _build_context_block(s: Dict) -> str:
     pa   = pas.get("away", {})
     ev   = s.get("raw_events") or s.get("events") or []
 
-    # ── Goals text ────────────────────────────────────────────────────────────
     goals_text = ""
     for incident in ev:
         if incident.get("type") == "goal":
@@ -103,11 +118,10 @@ def _build_context_block(s: Dict) -> str:
             player = p.get("name", "Unknown") if isinstance(p, dict) else str(p)
             minute = incident.get("time") or incident.get("minute", "?")
             team = "Home" if incident.get("isHome") else "Away"
-            goals_text += f"  \u26bd {minute}' \u2014 {player} ({team})\n"
+            goals_text += f"  ⚽ {minute}' — {player} ({team})\n"
     if not goals_text:
         goals_text = "  No goals\n"
 
-    # ── Lineup names ──────────────────────────────────────────────────────────
     def _xi(side_key: str) -> str:
         side = lp.get(side_key, {})
         if not side:
@@ -122,7 +136,7 @@ def _build_context_block(s: Dict) -> str:
 
     block = f"""
 === MATCH CONTEXT ===
-{s.get('home_team','?')} {s.get('home_score',0)} \u2013 {s.get('away_score',0)} {s.get('away_team','?')}
+{s.get('home_team','?')} {s.get('home_score',0)} – {s.get('away_score',0)} {s.get('away_team','?')}
 League: {s.get('league') or s.get('match_info',{}).get('league','?')} | Venue: {s.get('venue') or s.get('match_info',{}).get('venue','?')}
 Formations: {fm.get('home','?')} (Home) vs {fm.get('away','?')} (Away)
 
@@ -174,7 +188,6 @@ Rules:
 
 
 def generate_full_match_report(tactical_summary: Dict) -> Dict[str, str]:
-    """Generate all 14 report sections in formal English."""
     ctx = _build_context_block(tactical_summary)
     home = tactical_summary.get("home_team", "Home")
     away = tactical_summary.get("away_team", "Away")
@@ -183,35 +196,33 @@ def generate_full_match_report(tactical_summary: Dict) -> Dict[str, str]:
     winner = home if hs > as_ else (away if as_ > hs else None)
 
     report = {}
-    report["match_overview"]            = _section("1. MATCH OVERVIEW", "Summarize final result, flow, tactical context, and rhythm.", ctx)
+    report["match_overview"]             = _section("1. MATCH OVERVIEW", "Summarize final result, flow, tactical context, and rhythm.", ctx)
     win_label = "2. WHY DID THE TEAM WIN?" if winner else "2. WHY WAS IT A DRAW?"
-    report["why_team_won"]              = _section(win_label, "Explain key tactical reasons for the result.", ctx)
-    report["result_fairness"]           = _section("3. WAS THE RESULT FAIR?", "Analyze xG and shot quality.", ctx)
-    report["tactical_analysis"]         = _section("4. TACTICAL ANALYSIS", "Deep tactical analysis for BOTH teams.", ctx, max_tokens=800)
-    report["team_strengths"]            = _section("5. TEAM STRENGTHS", "Identify strongest mechanisms for both teams.", ctx)
-    report["team_weaknesses"]           = _section("6. TEAM WEAKNESSES", "Identify tactical gaps for both teams.", ctx)
-    report["performance_analysis"]      = _section("7. PERFORMANCE ANALYSIS", "Evaluate overall performance level.", ctx)
-    report["stats_interpretation"]      = _section("8. STATISTICS INTERPRETATION", "Explain what the numbers actually mean.", ctx)
-    report["turning_points"]            = _section("9. MATCH TURNING POINTS", "Identify key moments and shifts.", ctx)
-    report["match_mistakes"]            = _section("10. MATCH MISTAKES", "Analyze key tactical errors.", ctx)
-    report["best_worst_player"]         = _section("11. BEST AND WORST PLAYER", "Determine best/worst based on tactical impact.", ctx)
-    report["alternative_match_scenario"]= _section("12. ALTERNATIVE MATCH SCENARIO", "Generate tactical 'what-if' analysis.", ctx)
-    report["next_match_prediction"]     = _section("13. NEXT MATCH PREDICTION", "Tactical forecasting for future matches.", ctx)
-    report["professional_conclusion"]   = _section("14. PROFESSIONAL CONCLUSION", "Exactly 3 concise professional bullet points.", ctx, max_tokens=300)
+    report["why_team_won"]               = _section(win_label, "Explain key tactical reasons for the result.", ctx)
+    report["result_fairness"]            = _section("3. WAS THE RESULT FAIR?", "Analyze xG and shot quality.", ctx)
+    report["tactical_analysis"]          = _section("4. TACTICAL ANALYSIS", "Deep tactical analysis for BOTH teams.", ctx, max_tokens=800)
+    report["team_strengths"]             = _section("5. TEAM STRENGTHS", "Identify strongest mechanisms for both teams.", ctx)
+    report["team_weaknesses"]            = _section("6. TEAM WEAKNESSES", "Identify tactical gaps for both teams.", ctx)
+    report["performance_analysis"]       = _section("7. PERFORMANCE ANALYSIS", "Evaluate overall performance level.", ctx)
+    report["stats_interpretation"]       = _section("8. STATISTICS INTERPRETATION", "Explain what the numbers actually mean.", ctx)
+    report["turning_points"]             = _section("9. MATCH TURNING POINTS", "Identify key moments and shifts.", ctx)
+    report["match_mistakes"]             = _section("10. MATCH MISTAKES", "Analyze key tactical errors.", ctx)
+    report["best_worst_player"]          = _section("11. BEST AND WORST PLAYER", "Determine best/worst based on tactical impact.", ctx)
+    report["alternative_match_scenario"] = _section("12. ALTERNATIVE MATCH SCENARIO", "Generate tactical 'what-if' analysis.", ctx)
+    report["next_match_prediction"]      = _section("13. NEXT MATCH PREDICTION", "Tactical forecasting for future matches.", ctx)
+    report["professional_conclusion"]    = _section("14. PROFESSIONAL CONCLUSION", "Exactly 3 concise professional bullet points.", ctx, max_tokens=300)
     return report
 
 
-# ─── Telegram formatting ───────────────────────────────────────────────────────
+# ─── Telegram formatting ──────────────────────────────────────────────────────
 
 def _esc(text: str) -> str:
-    """Escape text for Telegram HTML."""
     if not text:
         return ""
     return html.escape(str(text))
 
 
 def format_report_for_telegram(report: Dict[str, str], tactical_summary: Dict) -> List[str]:
-    """Format the report into Telegram chunks using HTML."""
     home = _esc(tactical_summary.get("home_team", "Home"))
     away = _esc(tactical_summary.get("away_team", "Away"))
     hs   = _esc(str(tactical_summary.get("home_score", 0)))
@@ -237,7 +248,7 @@ def format_report_for_telegram(report: Dict[str, str], tactical_summary: Dict) -
     header = (
         f"\U0001f4cb <b>Elite Tactical Intelligence Report</b>\n"
         f"\u26bd <b>{home} {hs} \u2014 {as_} {away}</b>\n"
-        f"\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
+        f"\u2500" * 26
     )
     messages = [header]
 
@@ -255,7 +266,7 @@ def format_report_for_telegram(report: Dict[str, str], tactical_summary: Dict) -
     return messages
 
 
-# ─── Utility functions ─────────────────────────────────────────────────────────
+# ─── Utility functions ────────────────────────────────────────────────────────
 
 def generate_social_insights(tactical_summary: Dict) -> List[str]:
     ctx = _build_context_block(tactical_summary)
@@ -276,9 +287,37 @@ def answer_followup(question: str, match_context: Dict) -> str:
     return groq_complete(prompt, max_tokens=400)
 
 
-# ─── Backward compatibility ────────────────────────────────────────────────────
+def summarize_news(text: str) -> Dict[str, str]:
+    """Summarize a news article and extract tactical implication."""
+    prompt = (
+        f"News: {text[:500]}\n\n"
+        "Return JSON with keys: 'summary' (1 sentence) and 'tactical_implication' (1 sentence)."
+    )
+    resp = groq_complete(prompt, max_tokens=150)
+    try:
+        return json.loads(resp)
+    except Exception:
+        return {"summary": text[:200], "tactical_implication": ""}
+
+
+# ─── Backward compatibility ───────────────────────────────────────────────────
 
 def generate_tactical_report(tactical_summary: Dict, team_focus: str = None) -> str:
     report = generate_full_match_report(tactical_summary)
     combined = [f"*{k}*\n{v}" for k, v in report.items()]
     return "\n\n".join(combined)
+
+
+def generate_daily_briefing(matches: List[Dict], news_titles: List[str]) -> str:
+    """Generate a daily briefing from matches and news headlines."""
+    match_lines = "\n".join(
+        f"- {m.get('home','?')} vs {m.get('away','?')} ({m.get('league','')})"
+        for m in matches[:8]
+    ) or "No major matches today."
+    news_lines = "\n".join(f"- {t}" for t in news_titles[:6]) or "No headlines available."
+    prompt = (
+        f"Today's Matches:\n{match_lines}\n\n"
+        f"Latest Headlines:\n{news_lines}\n\n"
+        "Write a brief, professional daily football digest in 3-4 sentences."
+    )
+    return groq_complete(prompt, max_tokens=300)

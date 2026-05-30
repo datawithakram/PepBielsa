@@ -25,6 +25,16 @@ logger = logging.getLogger(__name__)
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 PORT = int(os.getenv("PORT", 10000))
 
+# ── Startup validation ────────────────────────────────────────────────────────
+if not TOKEN:
+    logger.critical("❌ TELEGRAM_BOT_TOKEN is not set! Set it in Render Environment Variables.")
+    import sys; sys.exit(1)
+
+logger.info("✅ TELEGRAM_BOT_TOKEN found")
+logger.info(f"✅ PORT = {PORT}")
+logger.info(f"✅ GROQ_API_KEY = {'set' if os.getenv('GROQ_API_KEY') else 'NOT SET (AI analysis will be limited)'}")
+logger.info(f"✅ GEMINI_API_KEY = {'set' if os.getenv('GEMINI_API_KEY') else 'NOT SET (Smart Crop disabled)'}")
+
 async def health_check(request):
     """Health check endpoint for UptimeRobot."""
     return web.Response(text="OK - PepBielsa Bot Running")
