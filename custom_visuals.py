@@ -27,6 +27,55 @@ _SESSION = cffi_requests.Session()
 
 logger = logging.getLogger(__name__)
 
+_DOMAINS = [
+    "https://api.sofascore.com/api/v1",
+    "https://api.sofascore.app/api/v1"
+]
+
+def _get_json(path: str, timeout: int = 8) -> Dict[str, Any]:
+    headers = {
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.sofascore.com/",
+        "Origin": "https://www.sofascore.com",
+        "Cache-Control": "max-age=0",
+    }
+    for base in _DOMAINS:
+        try:
+            resp = _SESSION.get(
+                f"{base}{path}", 
+                headers=headers,
+                impersonate="chrome124", 
+                timeout=timeout
+            )
+            if resp.status_code == 200:
+                return resp.json()
+        except Exception as e:
+            logger.warning(f"[SofaScore Custom fallback] {base}{path} failed: {e}")
+    return {}
+
+def _get_content(path: str, timeout: int = 8) -> Optional[bytes]:
+    headers = {
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.sofascore.com/",
+        "Origin": "https://www.sofascore.com",
+        "Cache-Control": "max-age=0",
+    }
+    for base in _DOMAINS:
+        try:
+            resp = _SESSION.get(
+                f"{base}{path}", 
+                headers=headers,
+                impersonate="chrome124", 
+                timeout=timeout
+            )
+            if resp.status_code == 200:
+                return resp.content
+        except Exception as e:
+            logger.warning(f"[SofaScore Custom fallback] {base}{path} content failed: {e}")
+    return None
+
 # Visual system tokens (exact match of visuals.py to match argentina_france_2022 visual identity)
 BG          = "#111827"  # Deep dark slate
 MAIN_GREEN  = "#00A86B"  # Vibrant green
@@ -167,14 +216,11 @@ def _draw_diagonal_cut(ax, color=MAIN_GREEN, alpha=0.08):
 def _fetch_player_meta(player_id: int) -> Dict[str, Any]:
     """Fetch player club team_id and national_team_id from SofaScore."""
     try:
-        url = f"https://api.sofascore.app/api/v1/player/{player_id}"
-        resp = _SESSION.get(url, impersonate="chrome124", timeout=8)
-        if resp.status_code == 200:
-            data = resp.json().get("player", {})
+        data = _get_json(f"/player/{player_id}").get("player", {})
+        if data:
             team_id = data.get("team", {}).get("id")
             national_team = data.get("nationalTeam", {}) or data.get("country", {})
             nat_team_id = national_team.get("id") if isinstance(national_team, dict) else None
-            # SofaScore national team logos via /team/{id}/image
             return {"club_id": team_id, "nat_team_id": nat_team_id}
     except Exception as e:
         logger.warning(f"Failed to fetch player meta: {e}")
@@ -214,10 +260,8 @@ def generate_custom_player_heatmap(
 
     try:
         if player_id:
-            resp = _SESSION.get("https://api.sofascore.app/api/v1/player/" + str(player_id),
-                                impersonate="chrome124", timeout=8)
-            if resp.status_code == 200:
-                pdata = resp.json().get("player", {})
+            pdata = _get_json(f"/player/{player_id}").get("player", {})
+            if pdata:
                 club_name = pdata.get("team", {}).get("name", team_name)
                 club_id = pdata.get("team", {}).get("id")
                 
@@ -477,10 +521,8 @@ def generate_custom_player_passmap(
 
     try:
         if player_id:
-            resp = _SESSION.get("https://api.sofascore.app/api/v1/player/" + str(player_id),
-                                impersonate="chrome124", timeout=8)
-            if resp.status_code == 200:
-                pdata = resp.json().get("player", {})
+            pdata = _get_json(f"/player/{player_id}").get("player", {})
+            if pdata:
                 club_name = pdata.get("team", {}).get("name", team_name)
                 club_id = pdata.get("team", {}).get("id")
                 
@@ -931,10 +973,8 @@ def generate_custom_player_shotmap(player_name: str, team_name: str, shots: List
     player_photo = None
     try:
         if player_id:
-            resp = _SESSION.get("https://api.sofascore.app/api/v1/player/" + str(player_id),
-                                impersonate="chrome124", timeout=8)
-            if resp.status_code == 200:
-                pdata     = resp.json().get("player", {})
+            pdata = _get_json(f"/player/{player_id}").get("player", {})
+            if pdata:
                 club_name = pdata.get("team", {}).get("name", team_name)
                 nat_obj   = pdata.get("nationalTeam") or pdata.get("country") or {}
                 nat_name  = nat_obj.get("name", "") if isinstance(nat_obj, dict) else ""
@@ -1795,11 +1835,9 @@ def _fetch_club_logo(team_id: int, size: int = 32) -> "Image.Image | None":
     if not team_id:
         return None
     try:
-        from curl_cffi import requests as cffi_req
-        url = f"https://api.sofascore.app/api/v1/team/{team_id}/image"
-        resp = cffi_req.get(url, impersonate="chrome124", timeout=6)
-        if resp.status_code == 200:
-            img = Image.open(BytesIO(resp.content)).convert("RGBA")
+        content = _get_content(f"/team/{team_id}/image", timeout=6)
+        if content:
+            img = Image.open(BytesIO(content)).convert("RGBA")
             img = img.resize((size, size), Image.LANCZOS)
             return img
     except Exception as e:

@@ -84,17 +84,28 @@ def _get_image(url: str) -> Optional[Image.Image]:
     except Exception: pass
     return None
 
+def _get_sofascore_image(path: str) -> Optional[Image.Image]:
+    domains = ["https://api.sofascore.com/api/v1", "https://api.sofascore.app/api/v1"]
+    for base in domains:
+        url = f"{base}{path}"
+        try:
+            resp = SESSION.get(url, impersonate="chrome124", timeout=10)
+            if resp.status_code == 200: 
+                return Image.open(BytesIO(resp.content)).convert("RGBA")
+        except Exception: pass
+    return None
+
 def _get_team_logo(team_id: int) -> Optional[Image.Image]:
     if not team_id: return None
-    return _get_image(f"https://api.sofascore.app/api/v1/team/{team_id}/image")
+    return _get_sofascore_image(f"/team/{team_id}/image")
 
 def _get_player_photo(player_id: int) -> Optional[Image.Image]:
     if not player_id: return None
-    return _get_image(f"https://api.sofascore.app/api/v1/player/{player_id}/image")
+    return _get_sofascore_image(f"/player/{player_id}/image")
 
 def _get_manager_photo(manager_id: int) -> Optional[Image.Image]:
     if not manager_id: return None
-    return _get_image(f"https://api.sofascore.app/api/v1/manager/{manager_id}/image")
+    return _get_sofascore_image(f"/manager/{manager_id}/image")
 
 # ─── Twemoji PNG Caches for OS Font Emoji Rendering Safety ──────────────────
 EMOJI_BALL = None

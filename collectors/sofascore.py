@@ -20,16 +20,31 @@ class SofaScoreCollector:
 
     def __init__(self):
         self.session = requests.Session()
+        self.domains = [
+            "https://api.sofascore.com/api/v1",
+            "https://api.sofascore.app/api/v1"
+        ]
 
     def _get(self, path: str) -> Any:
-        try:
-            resp = self.session.get(
-                f"{BASE}{path}", impersonate="chrome124", timeout=15
-            )
-            if resp.status_code == 200:
-                return resp.json()
-        except Exception as e:
-            logger.error(f"[SofaScore] {path} → {e}")
+        headers = {
+            "Accept": "*/*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://www.sofascore.com/",
+            "Origin": "https://www.sofascore.com",
+            "Cache-Control": "max-age=0",
+        }
+        for base in self.domains:
+            try:
+                resp = self.session.get(
+                    f"{base}{path}", 
+                    headers=headers,
+                    impersonate="chrome124", 
+                    timeout=15
+                )
+                if resp.status_code == 200:
+                    return resp.json()
+            except Exception as e:
+                logger.warning(f"[SofaScore fallback] {base}{path} failed: {e}")
         return {}
 
     # ── Heatmaps ────────────────────────────────────────────────────────────

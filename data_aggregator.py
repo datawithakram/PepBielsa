@@ -11,9 +11,55 @@ logger = logging.getLogger(__name__)
 
 class DataAggregator:
     def __init__(self):
-        self.base_url = "https://api.sofascore.app/api/v1"
+        self.domains = [
+            "https://api.sofascore.com/api/v1",
+            "https://api.sofascore.app/api/v1"
+        ]
         self.session = requests.Session()
-        # No need for complex manual headers, curl_cffi handles it via impersonate
+
+    def _request(self, path: str, timeout: int = 15) -> Optional[requests.Response]:
+        """
+        Robust request helper that tries multiple SofaScore domains (.com and .app)
+        and sends browser-like headers to bypass Cloudflare regional/VPS blocks.
+        """
+        headers = {
+            "Accept": "*/*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://www.sofascore.com/",
+            "Origin": "https://www.sofascore.com",
+            "Cache-Control": "max-age=0",
+        }
+        
+        last_err = None
+        for base in self.domains:
+            url = f"{base}{path}"
+            try:
+                resp = self.session.get(
+                    url, 
+                    headers=headers, 
+                    impersonate="chrome124", 
+                    timeout=timeout
+                )
+                if resp.status_code == 200:
+                    return resp
+                else:
+                    logger.warning(f"SofaScore request to {url} returned status {resp.status_code}")
+                    last_err = f"HTTP {resp.status_code}"
+            except Exception as e:
+                logger.warning(f"SofaScore request to {url} failed: {e}")
+                last_err = str(e)
+                
+        raise Exception(f"All SofaScore domains failed. Last error: {last_err}")
+
+    def _get_json(self, path: str, timeout: int = 15) -> Any:
+        """Helper to safely fetch and return JSON from SofaScore API."""
+        try:
+            resp = self._request(path, timeout=timeout)
+            if resp:
+                return resp.json()
+        except Exception as e:
+            logger.error(f"[DataAggregator] Failed to get JSON for {path}: {e}")
+        return {}
 
     def get_daily_fixtures(self, date_str: Optional[str] = None, major_only: bool = True) -> List[Dict]:
         """Fetch matches for a specific date from SofaScore."""
@@ -21,14 +67,10 @@ class DataAggregator:
             if not date_str:
                 date_str = datetime.now().strftime("%Y-%m-%d")
             
-            url = f"{self.base_url}/sport/football/scheduled-events/{date_str}"
-            resp = self.session.get(url, impersonate="chrome124", timeout=15)
-            resp.raise_for_status()
-            data = resp.json()
-            
+            data = self._get_json(f"/sport/football/scheduled-events/{date_str}")
             fixtures = []
             # Major leagues IDs in SofaScore (can be expanded)
-            major_leagues = {1, 17, 8, 23, 34, 35, 7, 679} # PL, LaLiga, Serie A, Bunesliga, Ligue 1, CL, etc.
+            major_leagues = {1, 17, 8, 23, 34, 35, 7, 679} # PL, LaLiga, Serie A, Bundesliga, Ligue 1, CL, etc.
             
             for event in data.get("events", []):
                 league_id = event.get("tournament", {}).get("uniqueTournament", {}).get("id")
@@ -71,38 +113,25 @@ class DataAggregator:
         """Deep extraction from SofaScore: stats, lineups, shotmaps, graph, incidents."""
         try:
             # 1. Basic Info
-            event_url = f"{self.base_url}/event/{event_id}"
-            event_data = self.session.get(event_url, impersonate="chrome124").json().get("event", {})
+            event_data = self._get_json(f"/event/{event_id}").get("event", {})
 
             # 2. Statistics
-            stats_url = f"{self.base_url}/event/{event_id}/statistics"
-            stats_data = self.session.get(stats_url, impersonate="chrome124").json().get("statistics", [])
+            stats_data = self._get_json(f"/event/{event_id}/statistics").get("statistics", [])
 
             # 3. Lineups
-            lineups_url = f"{self.base_url}/event/{event_id}/lineups"
-            lineups_data = self.session.get(lineups_url, impersonate="chrome124").json()
+            lineups_data = self._get_json(f"/event/{event_id}/lineups")
 
             # 4. Momentum Graph
-            graph_url = f"{self.base_url}/event/{event_id}/graph"
-            graph_data = self.session.get(graph_url, impersonate="chrome124").json().get("graphPoints", [])
+            graph_data = self._get_json(f"/event/{event_id}/graph").get("graphPoints", [])
 
             # 5. Shotmap
-            shotmap_url = f"{self.base_url}/event/{event_id}/shotmap"
-            shotmap_data = self.session.get(shotmap_url, impersonate="chrome124").json().get("shotmap", [])
+            shotmap_data = self._get_json(f"/event/{event_id}/shotmap").get("shotmap", [])
 
             # 6. Incidents (Goals, Cards, Subs)
-            incidents_url = f"{self.base_url}/event/{event_id}/incidents"
-            incidents_data = self.session.get(incidents_url, impersonate="chrome124").json().get("incidents", [])
+            incidents_data = self._get_json(f"/event/{event_id}/incidents").get("incidents", [])
 
             # 7. Average Positions (Passing & Spatial Nodes)
-            avg_positions_data = {}
-            try:
-                avg_pos_url = f"{self.base_url}/event/{event_id}/average-positions"
-                avg_pos_resp = self.session.get(avg_pos_url, impersonate="chrome124", timeout=10)
-                if avg_pos_resp.status_code == 200:
-                    avg_positions_data = avg_pos_resp.json()
-            except Exception as e:
-                logger.warning(f"Could not fetch average-positions: {e}")
+            avg_positions_data = self._get_json(f"/event/{event_id}/average-positions", timeout=10)
 
             # Flatten player stats from lineups
             player_stats = []
@@ -116,16 +145,8 @@ class DataAggregator:
                     heatmap_points = []
                     p_id = p.get("id")
                     if p_id and (stats.get("rating") or stats.get("minutesPlayed")):
-                        try:
-                            hm_url = f"{self.base_url}/event/{event_id}/player/{p_id}/heatmap"
-                            hm_resp = self.session.get(hm_url, impersonate="chrome124", timeout=10)
-                            if hm_resp.status_code == 200 and hm_resp.content:
-                                try:
-                                    heatmap_points = hm_resp.json().get("heatmap", []) or []
-                                except Exception:
-                                    pass
-                        except Exception:
-                            pass
+                        heatmap_data = self._get_json(f"/event/{event_id}/player/{p_id}/heatmap", timeout=10)
+                        heatmap_points = heatmap_data.get("heatmap", []) or []
                             
                     player_stats.append({
                         "id": p.get("id"),
@@ -177,10 +198,7 @@ class DataAggregator:
     def get_next_matches(self, team_id: int) -> List[Dict]:
         """Fetch upcoming matches for a team."""
         try:
-            url = f"{self.base_url}/team/{team_id}/events/next/0"
-            resp = self.session.get(url, impersonate="chrome124", timeout=15)
-            resp.raise_for_status()
-            return resp.json().get("events", [])
+            return self._get_json(f"/team/{team_id}/events/next/0").get("events", [])
         except Exception:
             return []
 
