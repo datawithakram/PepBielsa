@@ -63,51 +63,104 @@ class DataAggregator:
 
     def get_daily_fixtures(self, date_str: Optional[str] = None, major_only: bool = True) -> List[Dict]:
         """Fetch matches for a specific date from SofaScore."""
+        if not date_str:
+            date_str = datetime.now().strftime("%Y-%m-%d")
+
+        major_leagues = {1, 17, 8, 23, 34, 35, 7, 679} # PL, LaLiga, Serie A, Bundesliga, Ligue 1, CL, EL, Championship
+
+        # 1. Try the direct scheduled-events endpoint first
         try:
-            if not date_str:
-                date_str = datetime.now().strftime("%Y-%m-%d")
-            
             data = self._get_json(f"/sport/football/scheduled-events/{date_str}")
-            fixtures = []
-            # Major leagues IDs in SofaScore (can be expanded)
-            major_leagues = {1, 17, 8, 23, 34, 35, 7, 679} # PL, LaLiga, Serie A, Bundesliga, Ligue 1, CL, etc.
-            
-            for event in data.get("events", []):
-                league_id = event.get("tournament", {}).get("uniqueTournament", {}).get("id")
-                if major_only and league_id not in major_leagues:
-                    continue
-                
-                status_code = event.get("status", {}).get("code")
-                # Status codes: 0 (Not started), 100 (Finished), 6, 7 (Live)
-                status_type = event.get("status", {}).get("type")
-                
-                fixtures.append({
-                    "fixture": {
-                        "id": event["id"], 
-                        "timestamp": event["startTimestamp"],
-                        "status_code": status_code,
-                        "status_type": status_type
-                    },
-                    "league": {
-                        "id": league_id, 
-                        "name": event.get("tournament", {}).get("name")
-                    },
-                    "teams": {
-                        "home": {"name": event["homeTeam"]["name"], "id": event["homeTeam"]["id"]},
-                        "away": {"name": event["awayTeam"]["name"], "id": event["awayTeam"]["id"]}
-                    },
-                    "goals": {
-                        "home": event.get("homeScore", {}).get("current", 0), 
-                        "away": event.get("awayScore", {}).get("current", 0)
-                    },
-                    "status": {
-                        "long": event.get("status", {}).get("description", "Unknown")
-                    }
-                })
-            return fixtures
+            if data and data.get("events"):
+                fixtures = []
+                for event in data.get("events", []):
+                    league_id = event.get("tournament", {}).get("uniqueTournament", {}).get("id")
+                    if major_only and league_id not in major_leagues:
+                        continue
+                    
+                    status_code = event.get("status", {}).get("code")
+                    status_type = event.get("status", {}).get("type")
+                    
+                    fixtures.append({
+                        "fixture": {
+                            "id": event["id"], 
+                            "timestamp": event["startTimestamp"],
+                            "status_code": status_code,
+                            "status_type": status_type
+                        },
+                        "league": {
+                            "id": league_id, 
+                            "name": event.get("tournament", {}).get("name")
+                        },
+                        "teams": {
+                            "home": {"name": event["homeTeam"]["name"], "id": event["homeTeam"]["id"]},
+                            "away": {"name": event["awayTeam"]["name"], "id": event["awayTeam"]["id"]}
+                        },
+                        "goals": {
+                            "home": event.get("homeScore", {}).get("current", 0), 
+                            "away": event.get("awayScore", {}).get("current", 0)
+                        },
+                        "status": {
+                            "long": event.get("status", {}).get("description", "Unknown")
+                        }
+                    })
+                if fixtures:
+                    return fixtures
         except Exception as e:
-            logger.error(f"SofaScore fixtures fetch failed: {e}")
-            return []
+            logger.warning(f"SofaScore direct daily fixtures failed: {e}. Falling back to league-by-league query.")
+
+        # 2. Fallback: League-by-league query (completely immune to scheduled-events Cloudflare 403 blocks)
+        logger.info(f"Running SofaScore league-by-league fallback for date {date_str}...")
+        fixtures = []
+        for league_id in major_leagues:
+            try:
+                # Get latest season ID for this league
+                seasons_data = self._get_json(f"/unique-tournament/{league_id}/seasons", timeout=5)
+                seasons = seasons_data.get("seasons", [])
+                if not seasons:
+                    continue
+                season_id = seasons[0].get("id")
+                
+                # Fetch recent (last) and upcoming (next) events for page 0
+                for event_type in ["last", "next"]:
+                    events_data = self._get_json(f"/unique-tournament/{league_id}/season/{season_id}/events/{event_type}/0", timeout=5)
+                    events = events_data.get("events", [])
+                    for event in events:
+                        ts = event.get("startTimestamp")
+                        if not ts:
+                            continue
+                        event_date = datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+                        if event_date == date_str:
+                            status_code = event.get("status", {}).get("code")
+                            status_type = event.get("status", {}).get("type")
+                            
+                            fixtures.append({
+                                "fixture": {
+                                    "id": event["id"], 
+                                    "timestamp": ts,
+                                    "status_code": status_code,
+                                    "status_type": status_type
+                                },
+                                "league": {
+                                    "id": league_id, 
+                                    "name": event.get("tournament", {}).get("name")
+                                },
+                                "teams": {
+                                    "home": {"name": event["homeTeam"]["name"], "id": event["homeTeam"]["id"]},
+                                    "away": {"name": event["awayTeam"]["name"], "id": event["awayTeam"]["id"]}
+                                },
+                                "goals": {
+                                    "home": event.get("homeScore", {}).get("current", 0), 
+                                    "away": event.get("awayScore", {}).get("current", 0)
+                                },
+                                "status": {
+                                    "long": event.get("status", {}).get("description", "Unknown")
+                                }
+                            })
+            except Exception as e:
+                logger.warning(f"Fallback query failed for league {league_id}: {e}")
+                
+        return fixtures
 
     def get_match_all_data(self, event_id: int) -> Dict[str, Any]:
         """Deep extraction from SofaScore: stats, lineups, shotmaps, graph, incidents."""
